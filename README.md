@@ -1,6 +1,6 @@
 # RideRadar
 
-RideRadar automatically analyzes weather, route distance, traffic pressure, holidays, motorcycle access risk, tourism pressure, and riding conditions to recommend the best motorcycle destinations within reach.
+RideRadar automatically analyzes weather, forecast stability, trip duration, route distance, holidays, restriction risk, and riding opportunities to recommend the best motorcycle destinations within reach.
 
 Stop checking ten different websites. Know where to ride before you leave the garage.
 
@@ -33,13 +33,11 @@ RideRadar exposes a rider-facing `ride_quality_score` built from:
 | Stability score | Consistency across the complete trip |
 | Temperature score | Comfortable temperatures for riding gear |
 | Distance score | Whether the destination is worth the travel distance |
-| Traffic score | Expected congestion pressure |
-| Tourism pressure score | Crowding from holidays, weekends, and peak season |
-| Holiday score | Public holiday and long-weekend impact |
-| Motorcycle access score | Restriction and closure risk |
+| Holiday pressure score | Public holiday, school holiday, and long-weekend impact |
+| Access score | Motorcycle restriction and closure risk |
 | Road fun score | Destination suitability for enjoyable motorcycle roads |
 
-Current traffic, tourism, holiday, access, and road-fun scoring is deterministic and offline-friendly. It uses destination profiles, public-holiday calculations, long-weekend detection, seasonality, and known regional motorcycle restriction risk. Future routing providers can replace these heuristics with live traffic and road closure data.
+Current holiday, access, traffic pressure, tourism pressure, and road-fun scoring is deterministic and offline-friendly. It uses destination profiles, public-holiday calculations, long-weekend detection, seasonality, and known regional motorcycle restriction risk. Future routing providers can replace these heuristics with live traffic and road closure data.
 
 ## 10-Step Quickstart
 
@@ -118,6 +116,23 @@ content: >
   {% endif %}
 ```
 
+### Should I Ride Now Or Wait?
+
+```yaml
+type: markdown
+title: Best future window
+content: >
+  {% set item = state_attr('sensor.rideradar_sauerland_best_future_window', 'score') %}
+  {% set window = states.sensor.rideradar_sauerland_best_future_window %}
+  Sauerland best upcoming score:
+  **{{ states('sensor.rideradar_sauerland_best_future_window') }}/100**
+
+  Starts in:
+  **{{ state_attr('sensor.rideradar_sauerland_best_future_window', 'days_until') }} days**
+
+  {{ state_attr('sensor.rideradar_sauerland_best_future_window', 'explanation') }}
+```
+
 ### Destination Detail: Why This Score?
 
 ```yaml
@@ -129,7 +144,7 @@ content: >
 
   Traffic: **{{ state_attr(e, 'ride_experience').traffic_score }}/100**
 
-  Access: **{{ state_attr(e, 'ride_experience').motorcycle_access_score }}/100**
+  Access: **{{ state_attr(e, 'ride_experience').access_score }}/100**
 
   Stability: **{{ state_attr(e, 'weather_stability_score') }}/100**
 
@@ -171,6 +186,7 @@ Destination sensors expose:
 - `weekday_windows`
 - `ride_quality_score`
 - `ride_experience`
+- `best_future_window`
 - `daily_scores`
 - `trip_score_breakdown`
 - `trip_explanation`
@@ -187,13 +203,22 @@ traffic_score: 62
 traffic_level: "Medium"
 tourism_pressure_score: 58
 tourism_level: "High"
-holiday_score: 55
+holiday_pressure_score: 55
 motorcycle_access_score: 86
+access_score: 86
 access_status: "Open"
 route_distance_km: 190
 verdict: "Good window"
 explanation: "Excellent weather, but Ascension Day creates long-weekend traffic pressure."
 ```
+
+Each destination also gets a best-future-window sensor:
+
+- `sensor.rideradar_sauerland_best_future_window`
+- `sensor.rideradar_harz_best_future_window`
+- `sensor.rideradar_eifel_best_future_window`
+
+Attributes include `score`, `start_date`, `end_date`, `duration_days`, `days_until`, and `explanation`.
 
 ## Destination Imagery
 
@@ -201,6 +226,12 @@ RideRadar bundles local showcase imagery for the README so the project remains o
 
 - `docs/images/rideradar-dashboard-hero.png`
 - `docs/images/rideradar-destination-collage.png`
+- `docs/images/destinations/mosel-vineyards.png`
+- `docs/images/destinations/sauerland-roads.png`
+- `docs/images/destinations/harz-forests.png`
+- `docs/images/destinations/ardennes-valleys.png`
+- `docs/images/destinations/vosges-roads.png`
+- `docs/images/destinations/black-forest-roads.png`
 
 The destination collage represents the type of riding environments RideRadar is built for: Mosel vineyards, Sauerland hills, Harz forests, Ardennes valleys, Vosges roads, and Black Forest curves.
 

@@ -128,6 +128,7 @@ def test_ride_experience_penalizes_holiday_long_weekend_traffic() -> None:
     )
 
     assert experience.ride_quality_score < window.trip_score
+    assert experience.holiday_pressure_score < 60
     assert experience.traffic_score < 80
     assert "Ascension Day" in experience.holiday_names
     assert "Holiday pressure" in experience.explanation
@@ -148,6 +149,7 @@ def test_ride_experience_penalizes_weekend_motorcycle_restriction_risk() -> None
         forecasts,
     )
 
-    assert experience.motorcycle_access_score < 80
+    assert experience.access_score < 80
+    assert experience.motorcycle_access_score == experience.access_score
     assert experience.tourism_pressure_score < 80
     assert experience.access_notes

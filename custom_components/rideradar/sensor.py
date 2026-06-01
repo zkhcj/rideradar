@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorEntityDescription, SensorStateClass
@@ -165,6 +165,7 @@ async def async_setup_entry(
     for result in coordinator.data.get("results", []) if coordinator.data else []:
         if isinstance(result, DestinationResult):
             entities.append(RideRadarDestinationSensor(entry, coordinator, result.destination.name))
+            entities.append(RideRadarDestinationFutureWindowSensor(entry, coordinator, result.destination.name))
     async_add_entities(entities)
 
 
@@ -253,6 +254,7 @@ class RideRadarDestinationSensor(CoordinatorEntity[RideRadarDataCoordinator], Se
             "trip_score": result.trip_score,
             "ride_quality_score": result.ride_quality_score,
             "ride_experience": _experience_attributes(result),
+            "best_future_window": _best_future_window(result),
             "best_trip_window": _trip_window_attributes(result),
             "all_trip_windows": _trip_windows_attributes(result),
             "next_good_window": _next_good_window(result),
@@ -284,6 +286,64 @@ class RideRadarDestinationSensor(CoordinatorEntity[RideRadarDataCoordinator], Se
             "notes": result.destination.notes,
             "preferred_route_target_address": result.destination.preferred_route_target_address,
         }
+
+    @property
+    def _result(self) -> DestinationResult | None:
+        for result in (self.coordinator.data or {}).get("results", []):
+            if isinstance(result, DestinationResult) and result.destination.name == self._destination_name:
+                return result
+        return None
+
+
+class RideRadarDestinationFutureWindowSensor(CoordinatorEntity[RideRadarDataCoordinator], SensorEntity):
+    """Per-destination best future riding window sensor."""
+
+    _attr_attribution = ATTRIBUTION
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        coordinator: RideRadarDataCoordinator,
+        destination_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._destination_name = destination_name
+        slug = slugify(destination_name)
+        self.entity_description = SensorEntityDescription(
+            key=f"destination_{slug}_best_future_window",
+            name=f"{destination_name} Best Future Window",
+            icon="mdi:calendar-star",
+            native_unit_of_measurement=PERCENTAGE,
+            state_class=SensorStateClass.MEASUREMENT,
+        )
+        self._attr_device_info = _device_info(entry)
+        self._attr_unique_id = f"{entry.entry_id}_destination_{slug}_best_future_window"
+
+    @property
+    def available(self) -> bool:
+        """Return whether this destination has current coordinator data."""
+        return super().available and self._result is not None
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the best future window score."""
+        window = self._best_future_window
+        if window is None:
+            return None
+        return int(window["score"])
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return best future window details."""
+        return self._best_future_window or {}
+
+    @property
+    def _best_future_window(self) -> dict[str, Any] | None:
+        result = self._result
+        if result is None:
+            return None
+        return _best_future_window(result)
 
     @property
     def _result(self) -> DestinationResult | None:
@@ -346,7 +406,7 @@ def _trip_windows_attributes(result: DestinationResult, window_type: str | None 
 
 def _next_good_window(result: DestinationResult) -> dict[str, Any] | None:
     return next(
-        (window for window in _trip_windows_attributes(result) if int(window["trip_score"]) >= 70),
+        (window for window in _trip_windows_attributes(result) if int(window["ride_quality_score"]) >= 70),
         None,
     )
 
@@ -372,7 +432,9 @@ def _window_attributes(result: DestinationResult, window: Any) -> dict[str, Any]
         "traffic_level": _pressure_level(experience.traffic_score) if experience else None,
         "tourism_pressure_score": experience.tourism_pressure_score if experience else None,
         "tourism_level": _pressure_level(experience.tourism_pressure_score) if experience else None,
+        "holiday_pressure_score": experience.holiday_pressure_score if experience else None,
         "holiday_score": experience.holiday_score if experience else None,
+        "access_score": experience.access_score if experience else None,
         "motorcycle_access_score": experience.motorcycle_access_score if experience else None,
         "access_status": _access_status(experience.motorcycle_access_score) if experience else None,
         "distance_score": experience.distance_score if experience else None,
@@ -380,6 +442,7 @@ def _window_attributes(result: DestinationResult, window: Any) -> dict[str, Any]
         "road_fun_score": experience.road_fun_score if experience else None,
         "holiday_names": experience.holiday_names if experience else [],
         "access_notes": experience.access_notes if experience else [],
+        "days_until": _days_until(window.start_day),
         "daily_scores": window.daily_scores,
         "route_distance_km": route.distance_km if route else None,
         "estimated_travel_time": _format_minutes(route.travel_time_minutes) if route else None,
@@ -402,7 +465,9 @@ def _experience_attributes(result: DestinationResult) -> dict[str, Any] | None:
         "traffic_level": _pressure_level(experience.traffic_score),
         "tourism_pressure_score": experience.tourism_pressure_score,
         "tourism_level": _pressure_level(experience.tourism_pressure_score),
+        "holiday_pressure_score": experience.holiday_pressure_score,
         "holiday_score": experience.holiday_score,
+        "access_score": experience.access_score,
         "motorcycle_access_score": experience.motorcycle_access_score,
         "access_status": _access_status(experience.motorcycle_access_score),
         "distance_score": experience.distance_score,
@@ -411,6 +476,26 @@ def _experience_attributes(result: DestinationResult) -> dict[str, Any] | None:
         "holiday_names": experience.holiday_names,
         "access_notes": experience.access_notes,
         "explanation": experience.explanation,
+    }
+
+
+def _best_future_window(result: DestinationResult) -> dict[str, Any] | None:
+    windows = _trip_windows_attributes(result)
+    if not windows:
+        return None
+    best = max(windows, key=lambda window: int(window["ride_quality_score"]))
+    return {
+        "score": best["ride_quality_score"],
+        "ride_quality_score": best["ride_quality_score"],
+        "start_date": best["start_date"],
+        "end_date": best["end_date"],
+        "duration_days": best["duration_days"],
+        "days_until": best["days_until"],
+        "explanation": best["explanation"],
+        "traffic_level": best["traffic_level"],
+        "access_status": best["access_status"],
+        "holiday_pressure_score": best["holiday_pressure_score"],
+        "access_score": best["access_score"],
     }
 
 
@@ -458,6 +543,14 @@ def _verdict(score: int, weekend: bool) -> str:
     if score >= 55:
         return f"Marginal{suffix}"
     return f"Poor{suffix}"
+
+
+def _days_until(start_day: str) -> int | None:
+    try:
+        start = date.fromisoformat(start_day)
+    except ValueError:
+        return None
+    return max(0, (start - datetime.now().date()).days)
 
 
 def _pressure_level(score: int) -> str:

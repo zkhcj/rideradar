@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -261,7 +261,9 @@ def _opportunities(results: list[DestinationResult]) -> list[dict[str, Any]]:
                     "traffic_level": _pressure_level(experience.traffic_score),
                     "tourism_pressure_score": experience.tourism_pressure_score,
                     "tourism_level": _pressure_level(experience.tourism_pressure_score),
+                    "holiday_pressure_score": experience.holiday_pressure_score,
                     "holiday_score": experience.holiday_score,
+                    "access_score": experience.access_score,
                     "motorcycle_access_score": experience.motorcycle_access_score,
                     "access_status": _access_status(experience.motorcycle_access_score),
                     "distance_score": experience.distance_score,
@@ -275,6 +277,7 @@ def _opportunities(results: list[DestinationResult]) -> list[dict[str, Any]]:
                     "verdict": _window_verdict(experience.ride_quality_score, _is_weekend_window(window)),
                     "explanation": f"{window.trip_explanation} {experience.explanation}",
                     "window_type": "weekend" if _is_weekend_window(window) else "weekday",
+                    "days_until": _days_until(window.start_day),
                 }
             )
     return sorted(opportunities, key=lambda item: (-int(item["ride_quality_score"]), str(item["start_date"])))
@@ -330,6 +333,14 @@ def _format_minutes(minutes: int) -> str:
     if hours:
         return f"{hours}h {remainder:02d}m"
     return f"{remainder}m"
+
+
+def _days_until(start_day: str) -> int | None:
+    try:
+        start = date.fromisoformat(start_day)
+    except ValueError:
+        return None
+    return max(0, (start - datetime.now().date()).days)
 
 
 def _trip_duration_from_config(config: dict[str, Any], forecast_days: int) -> int:

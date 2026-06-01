@@ -120,7 +120,9 @@ class RideExperience:
     weather_score: int
     traffic_score: int
     tourism_pressure_score: int
+    holiday_pressure_score: int
     holiday_score: int
+    access_score: int
     motorcycle_access_score: int
     distance_score: int
     temperature_score: int

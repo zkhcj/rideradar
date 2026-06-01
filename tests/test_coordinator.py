@@ -150,6 +150,8 @@ async def test_coordinator_exposes_availability_windows_across_forecast_horizon(
     assert data["opportunities"][0]["route_distance_km"] == 100
     assert data["opportunities"][0]["traffic_level"] in {"Low", "Medium", "High", "Severe"}
     assert data["opportunities"][0]["access_status"] in {"Open", "Partial", "Restricted", "Avoid"}
+    assert data["opportunities"][0]["holiday_pressure_score"] is not None
+    assert data["opportunities"][0]["days_until"] is not None
     assert data["best_weekend_opportunity"]["start_date"] in {"2026-06-05", "2026-06-06"}
     assert data["best_weekday_opportunity"]["start_date"] == "2026-06-04"
 

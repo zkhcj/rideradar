@@ -238,25 +238,24 @@ def calculate_ride_experience(
     seasonal_pressure = _seasonal_pressure(dates)
     popularity = int(profile["popularity"])
 
+    holiday_pressure_score = _clamp_score(100 - holiday_pressure - long_weekend_pressure)
     traffic_penalty = min(85, holiday_pressure + long_weekend_pressure + weekend_pressure + (popularity * 0.35))
     traffic_score = _clamp_score(100 - traffic_penalty)
     tourism_penalty = min(85, holiday_pressure * 0.75 + seasonal_pressure + weekend_pressure + popularity)
     tourism_pressure_score = _clamp_score(100 - tourism_penalty)
-    holiday_score = _clamp_score(100 - holiday_pressure - long_weekend_pressure)
     motorcycle_access_score, access_notes = _motorcycle_access(destination, dates, int(profile["access"]))
+    access_score = motorcycle_access_score
     distance_score = _distance_score(route.distance_km)
     temperature_score = _temperature_score([forecast for forecast in forecasts if forecast.date in window.daily_scores])
     road_fun_score = int(profile["fun"])
 
     ride_quality_score = _clamp_score(
-        (window.trip_score * 0.35)
-        + (window.weather_stability_score * 0.20)
+        (window.trip_score * 0.40)
+        + (window.weather_stability_score * 0.25)
         + (temperature_score * 0.10)
         + (distance_score * 0.10)
-        + (traffic_score * 0.10)
-        + (tourism_pressure_score * 0.05)
-        + (holiday_score * 0.05)
-        + (motorcycle_access_score * 0.05)
+        + (holiday_pressure_score * 0.10)
+        + (access_score * 0.05)
     )
 
     explanation = _experience_explanation(
@@ -272,7 +271,9 @@ def calculate_ride_experience(
         weather_score=window.trip_score,
         traffic_score=traffic_score,
         tourism_pressure_score=tourism_pressure_score,
-        holiday_score=holiday_score,
+        holiday_pressure_score=holiday_pressure_score,
+        holiday_score=holiday_pressure_score,
+        access_score=access_score,
         motorcycle_access_score=motorcycle_access_score,
         distance_score=distance_score,
         temperature_score=temperature_score,
