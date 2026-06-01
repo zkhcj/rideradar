@@ -52,8 +52,6 @@
 
 ## Recommended Next Steps
 
-- Confirm HACS accepts the public repository URL used for distribution, or publish a GitHub mirror if the target HACS version only supports GitHub-backed custom repositories.
-
 - Add OSRM as the first real routing provider because it can be self-hosted and avoids paid API dependencies.
 - Introduce bounded concurrent forecast fetches once provider rate-limit behavior is defined.
 - Add more activity profiles only after defining their weather thresholds and route preferences.

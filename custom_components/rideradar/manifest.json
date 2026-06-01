@@ -4,10 +4,10 @@
   "codeowners": [],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://codeberg.org/chilion/rideradar",
+  "documentation": "https://github.com/zkhcj/rideradar",
   "integration_type": "service",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://codeberg.org/chilion/rideradar/issues",
+  "issue_tracker": "https://github.com/zkhcj/rideradar/issues",
   "loggers": ["custom_components.rideradar"],
   "requirements": [],
   "version": "0.1.0"
