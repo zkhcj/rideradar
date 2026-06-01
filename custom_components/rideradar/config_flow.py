@@ -25,18 +25,22 @@ from homeassistant.helpers.selector import (
 from .const import (
     CONF_ACTIVITY_PROFILE,
     CONF_CUSTOM_DESTINATIONS,
+    CONF_CUSTOM_TRIP_DURATION_DAYS,
     CONF_DESTINATIONS,
     CONF_DETOUR_FACTOR,
     CONF_ENABLED_DEFAULT_DESTINATIONS,
     CONF_FORECAST_DAYS,
     CONF_MAX_ROUTE_DISTANCE_KM,
+    CONF_PREFERRED_TRIP_DURATION,
     CONF_START_ADDRESS,
     CONF_START_LATITUDE,
     CONF_START_LONGITUDE,
     DEFAULT_ACTIVITY_PROFILE,
+    DEFAULT_CUSTOM_TRIP_DURATION_DAYS,
     DEFAULT_DETOUR_FACTOR,
     DEFAULT_FORECAST_DAYS,
     DEFAULT_MAX_ROUTE_DISTANCE_KM,
+    DEFAULT_PREFERRED_TRIP_DURATION,
     DOMAIN,
     MAX_DETOUR_FACTOR,
     MAX_FORECAST_DAYS,
@@ -49,6 +53,8 @@ from .const import (
     MIN_LATITUDE,
     MIN_LONGITUDE,
     MIN_ROUTE_DISTANCE_KM,
+    MIN_TRIP_DURATION_DAYS,
+    PREFERRED_TRIP_DURATION_OPTIONS,
     SUPPORTED_ACTIVITY_PROFILES,
 )
 from .destinations import (
@@ -609,6 +615,32 @@ def _settings_schema(defaults: dict[str, Any], include_destinations: bool = True
             NumberSelectorConfig(mode=NumberSelectorMode.BOX, min=MIN_FORECAST_DAYS, max=MAX_FORECAST_DAYS, step=1)
         ),
         vol.Required(
+            CONF_PREFERRED_TRIP_DURATION,
+            default=defaults.get(CONF_PREFERRED_TRIP_DURATION, DEFAULT_PREFERRED_TRIP_DURATION),
+        ): SelectSelector(
+            SelectSelectorConfig(
+                options=[
+                    {"value": "1", "label": "1 day"},
+                    {"value": "2", "label": "2 days"},
+                    {"value": "3", "label": "3 days"},
+                    {"value": "custom", "label": "Custom"},
+                ],
+                mode=SelectSelectorMode.DROPDOWN,
+            )
+        ),
+        vol.Required(
+            CONF_CUSTOM_TRIP_DURATION_DAYS,
+            default=defaults.get(CONF_CUSTOM_TRIP_DURATION_DAYS, DEFAULT_CUSTOM_TRIP_DURATION_DAYS),
+        ): NumberSelector(
+            NumberSelectorConfig(
+                mode=NumberSelectorMode.BOX,
+                min=MIN_TRIP_DURATION_DAYS,
+                max=MAX_FORECAST_DAYS,
+                step=1,
+                unit_of_measurement="days",
+            )
+        ),
+        vol.Required(
             CONF_ACTIVITY_PROFILE,
             default=defaults.get(CONF_ACTIVITY_PROFILE, DEFAULT_ACTIVITY_PROFILE),
         ): SelectSelector(
@@ -645,6 +677,22 @@ def _settings_errors(data: dict[str, Any]) -> dict[str, str]:
     forecast_days = _as_int(data.get(CONF_FORECAST_DAYS))
     if forecast_days is None or not MIN_FORECAST_DAYS <= forecast_days <= MAX_FORECAST_DAYS:
         errors[CONF_FORECAST_DAYS] = "invalid_forecast_days"
+    preferred_duration = str(data.get(CONF_PREFERRED_TRIP_DURATION, ""))
+    if preferred_duration not in PREFERRED_TRIP_DURATION_OPTIONS:
+        errors[CONF_PREFERRED_TRIP_DURATION] = "invalid_trip_duration"
+    custom_duration = _as_int(data.get(CONF_CUSTOM_TRIP_DURATION_DAYS))
+    if custom_duration is None or custom_duration < MIN_TRIP_DURATION_DAYS:
+        errors[CONF_CUSTOM_TRIP_DURATION_DAYS] = "invalid_trip_duration"
+    elif preferred_duration == "custom" and forecast_days is not None and custom_duration > forecast_days:
+        errors[CONF_CUSTOM_TRIP_DURATION_DAYS] = "invalid_trip_duration"
+    elif custom_duration > MAX_FORECAST_DAYS:
+        errors[CONF_CUSTOM_TRIP_DURATION_DAYS] = "invalid_trip_duration"
+    elif (
+        preferred_duration in {"1", "2", "3"}
+        and forecast_days is not None
+        and int(preferred_duration) > forecast_days
+    ):
+        errors[CONF_PREFERRED_TRIP_DURATION] = "invalid_trip_duration"
     detour_factor = _as_float(data.get(CONF_DETOUR_FACTOR))
     if detour_factor is None or not MIN_DETOUR_FACTOR <= detour_factor <= MAX_DETOUR_FACTOR:
         errors[CONF_DETOUR_FACTOR] = "invalid_detour_factor"
@@ -657,6 +705,8 @@ def _normalized_settings(data: dict[str, Any]) -> dict[str, Any]:
     return {
         CONF_MAX_ROUTE_DISTANCE_KM: float(data[CONF_MAX_ROUTE_DISTANCE_KM]),
         CONF_FORECAST_DAYS: int(data[CONF_FORECAST_DAYS]),
+        CONF_PREFERRED_TRIP_DURATION: str(data[CONF_PREFERRED_TRIP_DURATION]),
+        CONF_CUSTOM_TRIP_DURATION_DAYS: int(data[CONF_CUSTOM_TRIP_DURATION_DAYS]),
         CONF_ACTIVITY_PROFILE: str(data[CONF_ACTIVITY_PROFILE]),
         CONF_DETOUR_FACTOR: float(data[CONF_DETOUR_FACTOR]),
     }

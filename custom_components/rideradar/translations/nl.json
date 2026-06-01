@@ -36,6 +36,8 @@
         "data": {
           "max_route_distance_km": "Maximale routeafstand",
           "forecast_days": "Voorspellingsdagen",
+          "preferred_trip_duration": "Gewenste reisduur",
+          "custom_trip_duration_days": "Aangepaste reisduur",
           "activity_profile": "Activiteitsprofiel",
           "detour_factor": "Omwegfactor voor fallback-route",
           "enabled_default_destinations": "Ingeschakelde standaardbestemmingen"
@@ -49,6 +51,7 @@
       "invalid_coordinates": "Coordinaten zijn ongeldig of buiten het ondersteunde bereik.",
       "invalid_detour_factor": "De omwegfactor moet binnen het ondersteunde bereik liggen.",
       "invalid_forecast_days": "Voorspellingsdagen moet binnen het ondersteunde bereik liggen.",
+      "invalid_trip_duration": "Reisduur moet binnen de beschikbare voorspelling passen.",
       "invalid_range": "Maximale routeafstand moet binnen het ondersteunde bereik liggen.",
       "query_too_short": "Voer minimaal 3 tekens in."
     },
@@ -91,10 +94,12 @@
       },
       "settings": {
         "title": "Ritinstellingen",
-        "description": "Wijzig bereik, voorspelling, activiteitsprofiel en routefallback.",
+        "description": "Wijzig bereik, voorspelling, reisduur, activiteitsprofiel en routefallback.",
         "data": {
           "max_route_distance_km": "Maximale routeafstand",
           "forecast_days": "Voorspellingsdagen",
+          "preferred_trip_duration": "Gewenste reisduur",
+          "custom_trip_duration_days": "Aangepaste reisduur",
           "activity_profile": "Activiteitsprofiel",
           "detour_factor": "Omwegfactor voor fallback-route"
         }
@@ -152,6 +157,7 @@
       "invalid_destinations": "Bestemmingsgegevens moeten geldige gestructureerde JSON zijn.",
       "invalid_detour_factor": "De omwegfactor moet binnen het ondersteunde bereik liggen.",
       "invalid_forecast_days": "Voorspellingsdagen moet binnen het ondersteunde bereik liggen.",
+      "invalid_trip_duration": "Reisduur moet binnen de beschikbare voorspelling passen.",
       "invalid_range": "Maximale routeafstand moet binnen het ondersteunde bereik liggen.",
       "query_too_short": "Voer minimaal 3 tekens in."
     },

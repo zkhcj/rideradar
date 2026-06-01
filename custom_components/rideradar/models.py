@@ -87,6 +87,32 @@ class RideScore:
 
 
 @dataclass(frozen=True, slots=True)
+class TripScoreBreakdown:
+    """Detailed score components for a complete trip window."""
+
+    average_daily_score: int
+    worst_daily_score: int
+    weather_stability_score: int
+    bad_weather_penalty: int
+    duration_days: int
+
+
+@dataclass(frozen=True, slots=True)
+class TripWindow:
+    """A consecutive forecast window evaluated as one trip."""
+
+    start_day: str
+    end_day: str
+    duration_days: int
+    trip_score: int
+    daily_scores: dict[str, int]
+    weather_stability_score: int
+    stability_explanation: str
+    trip_score_breakdown: TripScoreBreakdown
+    trip_explanation: str
+
+
+@dataclass(frozen=True, slots=True)
 class DestinationResult:
     """Fully evaluated destination result."""
 
@@ -97,6 +123,15 @@ class DestinationResult:
     best_day: str | None
     best_score: int | None
     best_forecast: DailyForecast | None
+    trip_score: int | None
+    best_trip_window: TripWindow | None
+    best_start_day: str | None
+    trip_duration: int
+    weather_stability_score: int | None
+    stability_explanation: str
+    daily_scores: dict[str, int]
+    trip_score_breakdown: TripScoreBreakdown | None
+    trip_explanation: str
     reachable: bool
     available: bool
     explanation: str

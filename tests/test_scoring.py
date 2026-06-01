@@ -1,7 +1,12 @@
 """Tests for RideRadar scoring."""
 
 from custom_components.rideradar.models import DailyForecast
-from custom_components.rideradar.scoring import calculate_ride_score
+from custom_components.rideradar.scoring import (
+    calculate_best_trip_window,
+    calculate_ride_score,
+    calculate_trip_windows,
+    calculate_weather_stability_score,
+)
 
 
 def test_score_good_motorcycle_weather() -> None:
@@ -40,3 +45,67 @@ def test_score_penalizes_rain_wind_and_bad_weather_code() -> None:
     assert "rain probability" in result.explanation
     assert "gusts" in result.explanation
 
+
+def test_best_trip_window_uses_complete_consecutive_days() -> None:
+    forecasts = [
+        DailyForecast("Friday", 22, 0, 0, 10, 15, 20, 1),
+        DailyForecast("Saturday", 23, 0, 0, 12, 18, 25, 1),
+        DailyForecast("Sunday", 21, 20, 0.3, 18, 25, 55, 3),
+        DailyForecast("Monday", 15, 80, 9, 45, 70, 95, 95),
+    ]
+
+    best = calculate_best_trip_window(forecasts, 2)
+
+    assert best is not None
+    assert best.start_day == "Friday"
+    assert best.duration_days == 2
+    assert best.trip_score >= 90
+
+
+def test_stability_prefers_consistently_good_weather() -> None:
+    stable, _ = calculate_weather_stability_score([90, 88, 92])
+    unstable, explanation = calculate_weather_stability_score([100, 100, 30])
+
+    assert stable > unstable
+    assert stable >= 85
+    assert unstable < 65
+    assert "Weather consistency is low" in explanation
+
+
+def test_trip_score_applies_non_linear_bad_weather_penalty() -> None:
+    forecasts = [
+        DailyForecast("Friday", 24, 0, 0, 10, 15, 10, 1),
+        DailyForecast("Saturday", 24, 0, 0, 10, 15, 10, 1),
+        DailyForecast("Sunday", 17, 95, 12, 50, 75, 100, 95),
+    ]
+
+    best = calculate_best_trip_window(forecasts, 3)
+
+    assert best is not None
+    assert best.trip_score < 55
+    assert best.trip_score_breakdown.bad_weather_penalty >= 30
+    assert "because Sunday has" in best.trip_explanation
+
+
+def test_different_trip_durations_change_window_selection() -> None:
+    forecasts = [
+        DailyForecast("Friday", 20, 0, 0, 10, 15, 20, 1),
+        DailyForecast("Saturday", 21, 0, 0, 10, 15, 20, 1),
+        DailyForecast("Sunday", 10, 90, 8, 40, 60, 95, 61),
+    ]
+
+    one_day = calculate_best_trip_window(forecasts, 1)
+    two_days = calculate_best_trip_window(forecasts, 2)
+
+    assert one_day is not None
+    assert two_days is not None
+    assert one_day.duration_days == 1
+    assert two_days.duration_days == 2
+    assert two_days.start_day == "Friday"
+
+
+def test_limited_forecast_data_has_no_complete_trip_window() -> None:
+    forecasts = [DailyForecast("Friday", 22, 0, 0, 10, 15, 20, 1)]
+
+    assert calculate_trip_windows(forecasts, 2) == []
+    assert calculate_best_trip_window(forecasts, 2) is None

@@ -1,6 +1,6 @@
 # RideRadar
 
-RideRadar recommends the best weather destination for spontaneous motorcycle rides in Home Assistant.
+RideRadar recommends the best complete-trip weather destination for spontaneous motorcycle rides in Home Assistant.
 
 ## 10-Step Quickstart
 
@@ -11,7 +11,7 @@ RideRadar recommends the best weather destination for spontaneous motorcycle rid
 5. Search for RideRadar.
 6. Enter your start address or place name.
 7. Confirm the resolved location shown by RideRadar.
-8. Choose your maximum route distance, forecast days, and destination areas.
+8. Choose your maximum route distance, forecast days, preferred trip duration, and destination areas.
 9. Add the dashboard view below.
 10. Check RideRadar before you ride.
 
@@ -27,20 +27,22 @@ cards:
   - type: markdown
     title: RideRadar
     content: >
-      ## {{ states('sensor.rideradar_best_destination') }}
+      ## {{ states('sensor.rideradar_best_trip_destination') }}
 
-      Score: **{{ states('sensor.rideradar_best_score') }}/100**
+      Trip score: **{{ states('sensor.rideradar_best_trip_score') }}/100**
 
-      Best day: **{{ states('sensor.rideradar_best_day') }}**
+      Starts: **{{ states('sensor.rideradar_best_trip_start_day') }}**
+
+      Duration: **{{ states('sensor.rideradar_trip_duration') }} days**
 
       {{ states('sensor.rideradar_best_summary') }}
-
   - type: entities
     title: RideRadar details
     entities:
-      - entity: sensor.rideradar_best_destination
-      - entity: sensor.rideradar_best_score
-      - entity: sensor.rideradar_best_day
+      - entity: sensor.rideradar_best_trip_destination
+      - entity: sensor.rideradar_best_trip_score
+      - entity: sensor.rideradar_best_trip_start_day
+      - entity: sensor.rideradar_trip_duration
       - entity: sensor.rideradar_best_summary
       - entity: sensor.rideradar_destination_count
 ```
@@ -54,11 +56,13 @@ cards:
 
 ## What RideRadar Does
 
-RideRadar compares configured destination areas and recommends the best one for a short-notice outdoor trip. The first activity profile is `motorcycle`.
+RideRadar compares configured destination areas and recommends the best one for a complete short-notice trip. The first activity profile is `motorcycle`.
 
 RideRadar uses Open-Meteo for weather forecasts and a routing abstraction for travel distance. The MVP does not use straight-line distance as the final route distance. It estimates route distance with a configurable detour factor until OSRM, GraphHopper, or OpenRouteService support is added.
 
-RideRadar scores each destination and forecast day using:
+RideRadar still scores each forecast day, but the primary ranking is `trip_score`: the best complete consecutive trip window for the configured duration. This prevents a destination with one excellent day and one poor day from outranking a steadier weekend.
+
+RideRadar evaluates each day and trip window using:
 
 - precipitation probability
 - precipitation amount
@@ -67,6 +71,13 @@ RideRadar scores each destination and forecast day using:
 - temperature
 - cloud cover
 - weather code
+
+Trip scoring adds:
+
+- complete consecutive window analysis
+- weather stability scoring
+- non-linear penalties for heavy rain, strong wind, gusts, and storms
+- natural-language trip explanations
 
 ## Installation Via HACS
 
@@ -114,6 +125,8 @@ You can change these later from the integration options:
 - start location
 - maximum route distance in km
 - forecast days
+- preferred trip duration: 1 day, 2 days, 3 days, or custom
+- custom trip duration, bounded by the available forecast range
 - activity profile
 - enabled destinations
 - custom destinations
@@ -128,8 +141,10 @@ type: entities
 title: RideRadar
 entities:
   - entity: sensor.rideradar_best_destination
-  - entity: sensor.rideradar_best_score
-  - entity: sensor.rideradar_best_day
+  - entity: sensor.rideradar_best_trip_destination
+  - entity: sensor.rideradar_best_trip_score
+  - entity: sensor.rideradar_best_trip_start_day
+  - entity: sensor.rideradar_trip_duration
   - entity: sensor.rideradar_best_summary
   - entity: sensor.rideradar_destination_count
 ```
@@ -140,11 +155,13 @@ entities:
 type: markdown
 title: RideRadar
 content: >
-  ## {{ states('sensor.rideradar_best_destination') }}
+  ## {{ states('sensor.rideradar_best_trip_destination') }}
 
-  Score: **{{ states('sensor.rideradar_best_score') }}/100**
+  Trip score: **{{ states('sensor.rideradar_best_trip_score') }}/100**
 
-  Best day: **{{ states('sensor.rideradar_best_day') }}**
+  Best start: **{{ states('sensor.rideradar_best_trip_start_day') }}**
+
+  Duration: **{{ states('sensor.rideradar_trip_duration') }} days**
 
   {{ states('sensor.rideradar_best_summary') }}
 ```
@@ -153,13 +170,13 @@ content: >
 
 ```yaml
 type: custom:mushroom-template-card
-primary: "{{ states('sensor.rideradar_best_destination') }}"
+primary: "{{ states('sensor.rideradar_best_trip_destination') }}"
 secondary: >
-  {{ states('sensor.rideradar_best_score') }}/100 on
-  {{ states('sensor.rideradar_best_day') }}
+  {{ states('sensor.rideradar_best_trip_score') }}/100 from
+  {{ states('sensor.rideradar_best_trip_start_day') }}
 icon: mdi:motorbike
 icon_color: >
-  {% set score = states('sensor.rideradar_best_score') | int(0) %}
+  {% set score = states('sensor.rideradar_best_trip_score') | int(0) %}
   {% if score >= 80 %} green
   {% elif score >= 60 %} amber
   {% else %} red
@@ -193,6 +210,34 @@ In the options flow you can:
 
 RideRadar stores destinations internally as structured data. Normal users do not need to edit JSON. An advanced import/export option exists only for deliberate structured data import.
 
+## Trip-Based Output
+
+RideRadar's dashboard recommendation is based on the best complete trip window, not the best isolated day.
+
+Example destination attributes:
+
+```yaml
+trip_score: 87
+best_trip_window:
+  start_day: "2026-06-06"
+  end_day: "2026-06-07"
+  duration_days: 2
+  trip_score: 87
+  daily_scores:
+    "2026-06-06": 91
+    "2026-06-07": 84
+weather_stability_score: 92
+stability_explanation: "Weather consistency is high across the trip."
+trip_score_breakdown:
+  average_daily_score: 88
+  worst_daily_score: 84
+  weather_stability_score: 92
+  bad_weather_penalty: 0
+trip_explanation: "Scores 87/100 for a 2-day trip starting 2026-06-06. All trip days are expected to remain mostly dry. Temperatures stay between 18 C and 22 C. Winds remain light. Weather consistency is high."
+```
+
+A destination with daily scores like `100 / 100 / 30` is penalized because the weak day reduces the whole trip. A steadier `90 / 88 / 92` trip receives a higher stability score and should rank better for multi-day planning.
+
 ## Sensors
 
 RideRadar creates these summary sensors:
@@ -200,10 +245,16 @@ RideRadar creates these summary sensors:
 - `sensor.rideradar_best_destination`
 - `sensor.rideradar_best_score`
 - `sensor.rideradar_best_day`
+- `sensor.rideradar_best_trip_destination`
+- `sensor.rideradar_best_trip_score`
+- `sensor.rideradar_best_trip_start_day`
+- `sensor.rideradar_trip_duration`
 - `sensor.rideradar_best_summary`
 - `sensor.rideradar_destination_count`
 
-It also creates one distance sensor per enabled destination. Each destination sensor includes attributes for score per day, best day, route distance, estimated travel time, weather values, reachability, explanation, and routing provider.
+The legacy best destination, score, and day sensors now mirror the trip recommendation for dashboard compatibility.
+
+It also creates one distance sensor per enabled destination. Each destination sensor includes attributes for `trip_score`, `best_trip_window`, `best_start_day`, `trip_duration`, `weather_stability_score`, `daily_scores`, `trip_score_breakdown`, `trip_explanation`, route distance, estimated travel time, weather values, reachability, explanation, and routing provider.
 
 ## Troubleshooting
 

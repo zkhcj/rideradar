@@ -36,6 +36,8 @@
         "data": {
           "max_route_distance_km": "Maximum route distance",
           "forecast_days": "Forecast days",
+          "preferred_trip_duration": "Preferred trip duration",
+          "custom_trip_duration_days": "Custom trip duration",
           "activity_profile": "Activity profile",
           "detour_factor": "Fallback route detour factor",
           "enabled_default_destinations": "Enabled default destinations"
@@ -49,6 +51,7 @@
       "invalid_coordinates": "Coordinates are invalid or outside the supported range.",
       "invalid_detour_factor": "Detour factor must be within the supported range.",
       "invalid_forecast_days": "Forecast days must be within the supported range.",
+      "invalid_trip_duration": "Trip duration must fit within the available forecast range.",
       "invalid_range": "Maximum route distance must be within the supported range.",
       "query_too_short": "Enter at least 3 characters."
     },
@@ -91,10 +94,12 @@
       },
       "settings": {
         "title": "Trip settings",
-        "description": "Change range, forecast days, activity profile, and route-distance fallback.",
+        "description": "Change range, forecast days, trip duration, activity profile, and route-distance fallback.",
         "data": {
           "max_route_distance_km": "Maximum route distance",
           "forecast_days": "Forecast days",
+          "preferred_trip_duration": "Preferred trip duration",
+          "custom_trip_duration_days": "Custom trip duration",
           "activity_profile": "Activity profile",
           "detour_factor": "Fallback route detour factor"
         }
@@ -152,6 +157,7 @@
       "invalid_destinations": "Destination data must be valid structured JSON.",
       "invalid_detour_factor": "Detour factor must be within the supported range.",
       "invalid_forecast_days": "Forecast days must be within the supported range.",
+      "invalid_trip_duration": "Trip duration must fit within the available forecast range.",
       "invalid_range": "Maximum route distance must be within the supported range.",
       "query_too_short": "Enter at least 3 characters."
     },

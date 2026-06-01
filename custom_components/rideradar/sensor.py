@@ -37,19 +37,58 @@ async def async_setup_entry(
             entry,
             coordinator,
             SensorEntityDescription(
+                key="best_trip_destination",
+                name="Best Trip Destination",
+                icon="mdi:map-marker-star",
+            ),
+            lambda data: _best_attr(data, "name"),
+        ),
+        RideRadarSensor(
+            entry,
+            coordinator,
+            SensorEntityDescription(
+                key="best_trip_score",
+                name="Best Trip Score",
+                icon="mdi:weather-sunny-alert",
+                native_unit_of_measurement=PERCENTAGE,
+                state_class=SensorStateClass.MEASUREMENT,
+            ),
+            lambda data: _best_attr(data, "trip_score"),
+        ),
+        RideRadarSensor(
+            entry,
+            coordinator,
+            SensorEntityDescription(key="best_trip_start_day", name="Best Trip Start Day", icon="mdi:calendar-start"),
+            lambda data: _best_attr(data, "trip_start_day"),
+        ),
+        RideRadarSensor(
+            entry,
+            coordinator,
+            SensorEntityDescription(
+                key="trip_duration",
+                name="Trip Duration",
+                icon="mdi:calendar-range",
+                state_class=SensorStateClass.MEASUREMENT,
+            ),
+            lambda data: _best_attr(data, "trip_duration"),
+        ),
+        RideRadarSensor(
+            entry,
+            coordinator,
+            SensorEntityDescription(
                 key="best_score",
                 name="Best Score",
                 icon="mdi:weather-sunny-alert",
                 native_unit_of_measurement=PERCENTAGE,
                 state_class=SensorStateClass.MEASUREMENT,
             ),
-            lambda data: _best_attr(data, "score"),
+            lambda data: _best_attr(data, "trip_score"),
         ),
         RideRadarSensor(
             entry,
             coordinator,
             SensorEntityDescription(key="best_day", name="Best Day", icon="mdi:calendar-check"),
-            lambda data: _best_attr(data, "day"),
+            lambda data: _best_attr(data, "trip_start_day"),
         ),
         RideRadarSensor(
             entry,
@@ -148,6 +187,15 @@ class RideRadarDestinationSensor(CoordinatorEntity[RideRadarDataCoordinator], Se
         forecast = result.best_forecast
         route = result.route
         return {
+            "trip_score": result.trip_score,
+            "best_trip_window": _trip_window_attributes(result),
+            "best_start_day": result.best_start_day,
+            "trip_duration": result.trip_duration,
+            "weather_stability_score": result.weather_stability_score,
+            "stability_explanation": result.stability_explanation,
+            "daily_scores": result.daily_scores,
+            "trip_score_breakdown": _breakdown_attributes(result),
+            "trip_explanation": result.trip_explanation,
             "score_per_day": {date: score.score for date, score in result.scores.items()},
             "explanation_per_day": {date: score.explanation for date, score in result.scores.items()},
             "best_day": result.best_day,
@@ -191,8 +239,14 @@ def _best_attr(data: dict[str, object], key: str) -> Any:
         return None
     if key == "name":
         return best.destination.name
+    if key == "trip_score":
+        return best.trip_score
     if key == "score":
         return best.best_score
+    if key == "trip_start_day":
+        return best.best_start_day
+    if key == "trip_duration":
+        return best.trip_duration
     if key == "day":
         return best.best_day
     return None
@@ -203,3 +257,31 @@ def _format_minutes(minutes: int) -> str:
     if hours:
         return f"{hours}h {remainder:02d}m"
     return f"{remainder}m"
+
+
+def _trip_window_attributes(result: DestinationResult) -> dict[str, Any] | None:
+    window = result.best_trip_window
+    if window is None:
+        return None
+    return {
+        "start_day": window.start_day,
+        "end_day": window.end_day,
+        "duration_days": window.duration_days,
+        "trip_score": window.trip_score,
+        "daily_scores": window.daily_scores,
+        "weather_stability_score": window.weather_stability_score,
+        "stability_explanation": window.stability_explanation,
+    }
+
+
+def _breakdown_attributes(result: DestinationResult) -> dict[str, Any] | None:
+    breakdown = result.trip_score_breakdown
+    if breakdown is None:
+        return None
+    return {
+        "average_daily_score": breakdown.average_daily_score,
+        "worst_daily_score": breakdown.worst_daily_score,
+        "weather_stability_score": breakdown.weather_stability_score,
+        "bad_weather_penalty": breakdown.bad_weather_penalty,
+        "duration_days": breakdown.duration_days,
+    }

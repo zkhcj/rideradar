@@ -10,18 +10,22 @@ from custom_components.rideradar import async_migrate_entry
 from custom_components.rideradar.const import (
     CONF_ACTIVITY_PROFILE,
     CONF_CUSTOM_DESTINATIONS,
+    CONF_CUSTOM_TRIP_DURATION_DAYS,
     CONF_DESTINATIONS,
     CONF_DETOUR_FACTOR,
     CONF_ENABLED_DEFAULT_DESTINATIONS,
     CONF_FORECAST_DAYS,
     CONF_MAX_ROUTE_DISTANCE_KM,
+    CONF_PREFERRED_TRIP_DURATION,
     CONF_START_ADDRESS,
     CONF_START_LATITUDE,
     CONF_START_LONGITUDE,
     DEFAULT_ACTIVITY_PROFILE,
+    DEFAULT_CUSTOM_TRIP_DURATION_DAYS,
     DEFAULT_DETOUR_FACTOR,
     DEFAULT_FORECAST_DAYS,
     DEFAULT_MAX_ROUTE_DISTANCE_KM,
+    DEFAULT_PREFERRED_TRIP_DURATION,
     DOMAIN,
 )
 from custom_components.rideradar.coordinator import RideRadarDataCoordinator
@@ -66,6 +70,8 @@ def _settings_input(**overrides):
     data = {
         CONF_MAX_ROUTE_DISTANCE_KM: DEFAULT_MAX_ROUTE_DISTANCE_KM,
         CONF_FORECAST_DAYS: DEFAULT_FORECAST_DAYS,
+        CONF_PREFERRED_TRIP_DURATION: DEFAULT_PREFERRED_TRIP_DURATION,
+        CONF_CUSTOM_TRIP_DURATION_DAYS: DEFAULT_CUSTOM_TRIP_DURATION_DAYS,
         CONF_ACTIVITY_PROFILE: DEFAULT_ACTIVITY_PROFILE,
         CONF_DETOUR_FACTOR: DEFAULT_DETOUR_FACTOR,
         CONF_ENABLED_DEFAULT_DESTINATIONS: default_destination_names(),
@@ -84,6 +90,8 @@ def _entry(data=None):
             CONF_START_LONGITUDE: 4.3517,
             CONF_MAX_ROUTE_DISTANCE_KM: DEFAULT_MAX_ROUTE_DISTANCE_KM,
             CONF_FORECAST_DAYS: DEFAULT_FORECAST_DAYS,
+            CONF_PREFERRED_TRIP_DURATION: DEFAULT_PREFERRED_TRIP_DURATION,
+            CONF_CUSTOM_TRIP_DURATION_DAYS: DEFAULT_CUSTOM_TRIP_DURATION_DAYS,
             CONF_ACTIVITY_PROFILE: DEFAULT_ACTIVITY_PROFILE,
             CONF_DETOUR_FACTOR: DEFAULT_DETOUR_FACTOR,
             CONF_ENABLED_DEFAULT_DESTINATIONS: default_destination_names(),
@@ -161,6 +169,30 @@ async def test_config_flow_manual_location_is_advanced_path(hass, monkeypatch) -
         user_input={CONF_START_ADDRESS: "Manual", CONF_START_LATITUDE: 51.0, CONF_START_LONGITUDE: 5.0},
     )
     assert result["step_id"] == "settings"
+
+
+async def test_config_flow_saves_custom_trip_duration(hass, monkeypatch) -> None:
+    _patch_setup(monkeypatch)
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+        data={CONF_START_ADDRESS: "Brussels"},
+    )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input=_settings_input(
+            **{
+                CONF_FORECAST_DAYS: 5,
+                CONF_PREFERRED_TRIP_DURATION: "custom",
+                CONF_CUSTOM_TRIP_DURATION_DAYS: 4,
+            }
+        ),
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_PREFERRED_TRIP_DURATION] == "custom"
+    assert result["data"][CONF_CUSTOM_TRIP_DURATION_DAYS] == 4
 
 
 async def test_options_flow_edits_enabled_destinations(hass, monkeypatch) -> None:
