@@ -91,7 +91,7 @@ ACTION_ADVANCED = "advanced_import_export"
 class RideRadarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle RideRadar config flow."""
 
-    VERSION = 2
+    VERSION = 3
 
     def __init__(self) -> None:
         self._data: dict[str, Any] = {}
@@ -221,6 +221,7 @@ class RideRadarOptionsFlow(config_entries.OptionsFlow):
         self._config_entry = config_entry
         self._location_results: list[LocationResult] = []
         self._pending_destination: dict[str, Any] = {}
+        self._pending_options: dict[str, Any] = {}
 
     @property
     def _config(self) -> dict[str, Any]:
@@ -230,30 +231,35 @@ class RideRadarOptionsFlow(config_entries.OptionsFlow):
         self,
         user_input: dict[str, Any] | None = None,
     ) -> config_entries.ConfigFlowResult:
-        """Show options menu."""
+        """Show one normal settings screen."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return await getattr(self, f"async_step_{user_input[FIELD_ACTION]}")()
+            errors = _settings_errors(user_input)
+            query = str(user_input.get(CONF_START_ADDRESS, "")).strip()
+            if len(query) < MIN_GEOCODE_QUERY_LENGTH:
+                errors[CONF_START_ADDRESS] = "query_too_short"
+            if not errors:
+                self._pending_options = {
+                    **_normalized_settings(user_input),
+                    **_destination_options_from_selection(self._config, user_input[FIELD_ENABLED_DESTINATIONS]),
+                }
+                if query != str(self._config.get(CONF_START_ADDRESS, "")).strip():
+                    results = await self._geocode(query, errors, CONF_START_ADDRESS)
+                    if results:
+                        self._location_results = results
+                        if len(results) == 1:
+                            self._pending_destination = _start_location_options(results[0])
+                            return await self.async_step_confirm_location()
+                        return await self.async_step_choose_location()
+                elif not errors:
+                    return self._save_options(
+                        {**self._pending_options, **_current_start_location_options(self._config)}
+                    )
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(FIELD_ACTION): SelectSelector(
-                        SelectSelectorConfig(
-                            options=[
-                                {"value": ACTION_START, "label": "Change start location"},
-                                {"value": ACTION_MANUAL_START, "label": "Advanced: enter start coordinates"},
-                                {"value": ACTION_SETTINGS, "label": "Trip settings"},
-                                {"value": ACTION_DESTINATIONS, "label": "Enable or disable destinations"},
-                                {"value": ACTION_ADD_CUSTOM, "label": "Add custom destination"},
-                                {"value": ACTION_REMOVE_CUSTOM, "label": "Remove custom destination"},
-                                {"value": ACTION_RESET_DEFAULTS, "label": "Reset destinations to defaults"},
-                                {"value": ACTION_ADVANCED, "label": "Advanced import/export"},
-                            ],
-                            mode=SelectSelectorMode.DROPDOWN,
-                        )
-                    )
-                }
-            ),
+            description_placeholders=_current_location_placeholders(self._config),
+            data_schema=_normal_options_schema(self._config),
+            errors=errors,
         )
 
     async def async_step_start_location(
@@ -315,7 +321,7 @@ class RideRadarOptionsFlow(config_entries.OptionsFlow):
     ) -> config_entries.ConfigFlowResult:
         """Confirm the resolved options start location."""
         if user_input is not None:
-            return self._save_options(self._pending_destination)
+            return self._save_options({**self._pending_options, **self._pending_destination})
         return self.async_show_form(
             step_id="confirm_location",
             description_placeholders={
@@ -657,6 +663,54 @@ def _settings_schema(defaults: dict[str, Any], include_destinations: bool = True
     return vol.Schema(schema)
 
 
+def _normal_options_schema(defaults: dict[str, Any]) -> vol.Schema:
+    schema = dict(_settings_schema(defaults, include_destinations=False).schema)
+    return vol.Schema(
+        {
+            vol.Required(CONF_START_ADDRESS, default=defaults.get(CONF_START_ADDRESS, "")): TextSelector(
+                TextSelectorConfig(type=TextSelectorType.TEXT)
+            ),
+            **schema,
+            vol.Required(FIELD_ENABLED_DESTINATIONS, default=enabled_destination_keys(defaults)): SelectSelector(
+                SelectSelectorConfig(options=destination_enable_options(defaults), multiple=True)
+            ),
+        }
+    )
+
+
+def _destination_options_from_selection(config: dict[str, Any], selected_values: list[str]) -> dict[str, Any]:
+    selected = set(selected_values)
+    custom = []
+    for destination in custom_destinations_from_config(config):
+        custom.append(
+            DestinationArea(
+                destination.name,
+                destination.country_region,
+                destination.latitude,
+                destination.longitude,
+                enabled=f"custom:{destination.name}" in selected,
+                notes=destination.notes,
+                preferred_route_target_address=destination.preferred_route_target_address,
+            ).as_dict()
+        )
+    return {
+        CONF_ENABLED_DEFAULT_DESTINATIONS: [
+            destination.name for destination in DEFAULT_DESTINATIONS if f"default:{destination.name}" in selected
+        ],
+        CONF_CUSTOM_DESTINATIONS: custom,
+    }
+
+
+def _current_location_placeholders(config: dict[str, Any]) -> dict[str, str]:
+    latitude = _as_float(config.get(CONF_START_LATITUDE))
+    longitude = _as_float(config.get(CONF_START_LONGITUDE))
+    return {
+        "address": str(config.get(CONF_START_ADDRESS, "")),
+        "latitude": f"{latitude:.5f}" if latitude is not None else "unknown",
+        "longitude": f"{longitude:.5f}" if longitude is not None else "unknown",
+    }
+
+
 def _settings_errors(data: dict[str, Any]) -> dict[str, str]:
     errors: dict[str, str] = {}
     max_distance = _as_float(data.get(CONF_MAX_ROUTE_DISTANCE_KM))
@@ -705,6 +759,14 @@ def _start_location_options(result: LocationResult) -> dict[str, Any]:
         CONF_START_ADDRESS: result.label,
         CONF_START_LATITUDE: result.latitude,
         CONF_START_LONGITUDE: result.longitude,
+    }
+
+
+def _current_start_location_options(config: dict[str, Any]) -> dict[str, Any]:
+    return {
+        CONF_START_ADDRESS: str(config.get(CONF_START_ADDRESS, "")),
+        CONF_START_LATITUDE: config.get(CONF_START_LATITUDE),
+        CONF_START_LONGITUDE: config.get(CONF_START_LONGITUDE),
     }
 
 

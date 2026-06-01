@@ -29,7 +29,11 @@ from custom_components.rideradar.const import (
     DOMAIN,
 )
 from custom_components.rideradar.coordinator import RideRadarDataCoordinator
-from custom_components.rideradar.destinations import default_destination_names, default_destinations_as_dicts
+from custom_components.rideradar.destinations import (
+    default_destination_names,
+    default_destinations_as_dicts,
+    enabled_destination_keys,
+)
 from custom_components.rideradar.geocoding import LocationResult, OpenMeteoGeocodingClient
 from custom_components.rideradar.models import DestinationArea
 
@@ -75,6 +79,23 @@ def _settings_input(**overrides):
         CONF_ACTIVITY_PROFILE: DEFAULT_ACTIVITY_PROFILE,
         CONF_DETOUR_FACTOR: DEFAULT_DETOUR_FACTOR,
         CONF_ENABLED_DEFAULT_DESTINATIONS: default_destination_names(),
+    }
+    data.update(overrides)
+    return data
+
+
+def _normal_options_input(entry, **overrides):
+    data = {
+        CONF_START_ADDRESS: entry.data.get(CONF_START_ADDRESS, "Brussels, Belgium"),
+        CONF_MAX_ROUTE_DISTANCE_KM: entry.data.get(CONF_MAX_ROUTE_DISTANCE_KM, DEFAULT_MAX_ROUTE_DISTANCE_KM),
+        CONF_FORECAST_DAYS: entry.data.get(CONF_FORECAST_DAYS, DEFAULT_FORECAST_DAYS),
+        CONF_PREFERRED_TRIP_DURATION: entry.data.get(CONF_PREFERRED_TRIP_DURATION, DEFAULT_PREFERRED_TRIP_DURATION),
+        CONF_CUSTOM_TRIP_DURATION_DAYS: entry.data.get(
+            CONF_CUSTOM_TRIP_DURATION_DAYS, DEFAULT_CUSTOM_TRIP_DURATION_DAYS
+        ),
+        CONF_ACTIVITY_PROFILE: entry.data.get(CONF_ACTIVITY_PROFILE, DEFAULT_ACTIVITY_PROFILE),
+        CONF_DETOUR_FACTOR: entry.data.get(CONF_DETOUR_FACTOR, DEFAULT_DETOUR_FACTOR),
+        "enabled_destinations": enabled_destination_keys({**entry.data, **entry.options}),
     }
     data.update(overrides)
     return data
@@ -193,21 +214,43 @@ async def test_config_flow_saves_custom_trip_duration(hass, monkeypatch) -> None
     assert result["data"][CONF_CUSTOM_TRIP_DURATION_DAYS] == 4
 
 
-async def test_options_flow_edits_enabled_destinations(hass, monkeypatch) -> None:
+async def test_options_flow_shows_all_normal_settings_without_action_dropdown(hass, monkeypatch) -> None:
     _patch_setup(monkeypatch)
     entry = _entry()
     entry.add_to_hass(hass)
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    result = await hass.config_entries.options.async_configure(result["flow_id"], user_input={"action": "destinations"})
-    assert result["step_id"] == "destinations"
 
+    assert result["step_id"] == "init"
+    schema_keys = [key.schema for key in result["data_schema"].schema]
+    assert "action" not in schema_keys
+    assert CONF_START_ADDRESS in schema_keys
+    assert "enabled_destinations" in schema_keys
+    assert result["description_placeholders"]["address"] == "Brussels, Belgium"
+    assert result["description_placeholders"]["latitude"] == "50.85030"
+
+
+async def test_options_flow_edits_normal_settings_and_destinations(hass, monkeypatch) -> None:
+    _patch_setup(monkeypatch)
+    entry = _entry()
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        user_input={"enabled_destinations": ["default:Sauerland", "default:Eifel"]},
+        user_input=_normal_options_input(
+            entry,
+            **{
+                CONF_MAX_ROUTE_DISTANCE_KM: 450,
+                "enabled_destinations": ["default:Sauerland", "default:Eifel"],
+            },
+        ),
     )
+
     assert result["type"] == "create_entry"
+    assert result["data"][CONF_MAX_ROUTE_DISTANCE_KM] == 450
     assert result["data"][CONF_ENABLED_DEFAULT_DESTINATIONS] == ["Sauerland", "Eifel"]
+    assert isinstance(result["data"][CONF_CUSTOM_DESTINATIONS], list)
 
 
 async def test_options_flow_confirms_changed_start_location(hass, monkeypatch) -> None:
@@ -217,10 +260,8 @@ async def test_options_flow_confirms_changed_start_location(hass, monkeypatch) -
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], user_input={"action": "start_location"}
-    )
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], user_input={CONF_START_ADDRESS: "Brussels"}
+        result["flow_id"],
+        user_input=_normal_options_input(entry, **{CONF_START_ADDRESS: "Utrecht, Nederland"}),
     )
 
     assert result["step_id"] == "confirm_location"
@@ -232,52 +273,53 @@ async def test_options_flow_confirms_changed_start_location(hass, monkeypatch) -
     assert result["data"][CONF_START_ADDRESS] == "Brussels, Belgium"
 
 
-async def test_options_flow_allows_manual_coordinates_only_as_advanced_action(hass, monkeypatch) -> None:
+async def test_options_flow_preserves_previous_start_location_when_not_changed(hass, monkeypatch) -> None:
     _patch_setup(monkeypatch)
     entry = _entry()
     entry.add_to_hass(hass)
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], user_input={"action": "manual_start_location"}
-    )
-
-    assert result["step_id"] == "manual_start_location"
-
-
-async def test_options_flow_adds_and_removes_custom_destination(hass, monkeypatch) -> None:
-    _patch_setup(monkeypatch)
-    entry = _entry()
-    entry.add_to_hass(hass)
-
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], user_input={"action": "add_custom_destination"}
-    )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        user_input={
-            "destination_name": "Ardennes",
-            "country_region": "Belgium",
-            "address": "Ardennes",
-            "enabled": True,
-            "notes": "Nice roads",
-        },
+        user_input=_normal_options_input(entry, **{CONF_MAX_ROUTE_DISTANCE_KM: 500}),
     )
 
     assert result["type"] == "create_entry"
-    assert result["data"][CONF_CUSTOM_DESTINATIONS][0]["name"] == "Ardennes"
-    entry = _entry({**entry.data, **result["data"]})
+    assert result["data"][CONF_START_ADDRESS] == "Brussels, Belgium"
+    assert result["data"][CONF_START_LATITUDE] == 50.8503
+    assert result["data"][CONF_START_LONGITUDE] == 4.3517
+
+
+async def test_options_flow_geocoding_failure_keeps_user_on_normal_settings(hass, monkeypatch) -> None:
+    async def fake_empty_search(self, query, limit=5):
+        return []
+
+    _patch_setup(monkeypatch, fake_empty_search)
+    entry = _entry()
     entry.add_to_hass(hass)
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], user_input={"action": "remove_custom_destination"}
+        result["flow_id"],
+        user_input=_normal_options_input(entry, **{CONF_START_ADDRESS: "Nope"}),
     )
+
+    assert result["step_id"] == "init"
+    assert result["errors"][CONF_START_ADDRESS] == "address_not_found"
+
+
+async def test_options_flow_multiple_location_results_are_selectable(hass, monkeypatch) -> None:
+    _patch_setup(monkeypatch, _fake_multi_search)
+    entry = _entry()
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], user_input={CONF_CUSTOM_DESTINATIONS: ["Ardennes"]}
+        result["flow_id"],
+        user_input=_normal_options_input(entry, **{CONF_START_ADDRESS: "Luxembourg"}),
     )
-    assert result["data"][CONF_CUSTOM_DESTINATIONS] == []
+
+    assert result["step_id"] == "choose_location"
 
 
 async def test_migrates_legacy_raw_json_destinations(hass) -> None:
@@ -298,3 +340,26 @@ async def test_migrates_legacy_raw_json_destinations(hass) -> None:
     assert CONF_DESTINATIONS not in entry.data
     assert entry.data[CONF_ENABLED_DEFAULT_DESTINATIONS] == ["Sauerland"]
     assert entry.data[CONF_CUSTOM_DESTINATIONS][0]["name"] == "Legacy Custom"
+    assert entry.version == 3
+
+
+async def test_migrates_011_structured_entry_defaults(hass) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        data={
+            CONF_START_ADDRESS: "Readable start",
+            CONF_START_LATITUDE: 50.0,
+            CONF_START_LONGITUDE: 4.0,
+            CONF_ENABLED_DEFAULT_DESTINATIONS: ["Sauerland"],
+            CONF_CUSTOM_DESTINATIONS: [],
+        },
+    )
+    entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry) is True
+    assert entry.data[CONF_START_ADDRESS] == "Readable start"
+    assert entry.data[CONF_FORECAST_DAYS] == DEFAULT_FORECAST_DAYS
+    assert entry.data[CONF_PREFERRED_TRIP_DURATION] == DEFAULT_PREFERRED_TRIP_DURATION
+    assert entry.data[CONF_CUSTOM_DESTINATIONS] == []
+    assert entry.version == 3

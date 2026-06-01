@@ -132,6 +132,7 @@ class DestinationResult:
     daily_scores: dict[str, int]
     trip_score_breakdown: TripScoreBreakdown | None
     trip_explanation: str
+    all_trip_windows: list[TripWindow]
     reachable: bool
     available: bool
     explanation: str

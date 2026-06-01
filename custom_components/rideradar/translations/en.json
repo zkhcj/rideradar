@@ -25,7 +25,7 @@
         "description": "Choose your ride range, forecast window, activity profile, and default destination areas.",
         "data": {
           "max_route_distance_km": "Maximum route distance",
-          "forecast_days": "Forecast days",
+          "forecast_days": "Forecast horizon days",
           "preferred_trip_duration": "Preferred trip duration",
           "custom_trip_duration_days": "Custom trip duration",
           "activity_profile": "Activity profile",
@@ -53,10 +53,17 @@
   "options": {
     "step": {
       "init": {
-        "title": "RideRadar options",
-        "description": "Choose what you want to change.",
+        "title": "RideRadar settings",
+        "description": "Current start location: **{address}**. Coordinates: **{latitude}**, **{longitude}**. Edit the address or place name to resolve a new start location; coordinates are shown only for confirmation.",
         "data": {
-          "action": "Action"
+          "start_address": "Start address or place",
+          "max_route_distance_km": "Maximum route distance",
+          "forecast_days": "Forecast horizon days",
+          "preferred_trip_duration": "Preferred trip duration",
+          "custom_trip_duration_days": "Custom trip duration",
+          "activity_profile": "Activity profile",
+          "detour_factor": "Fallback route detour factor",
+          "enabled_destinations": "Enabled destinations"
         }
       },
       "start_location": {
@@ -92,7 +99,7 @@
         "description": "Change range, forecast days, trip duration, activity profile, and route-distance fallback.",
         "data": {
           "max_route_distance_km": "Maximum route distance",
-          "forecast_days": "Forecast days",
+          "forecast_days": "Forecast horizon days",
           "preferred_trip_duration": "Preferred trip duration",
           "custom_trip_duration_days": "Custom trip duration",
           "activity_profile": "Activity profile",

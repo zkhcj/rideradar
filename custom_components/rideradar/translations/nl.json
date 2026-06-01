@@ -25,7 +25,7 @@
         "description": "Kies bereik, voorspelling, activiteitsprofiel en standaard bestemmingsgebieden.",
         "data": {
           "max_route_distance_km": "Maximale routeafstand",
-          "forecast_days": "Voorspellingsdagen",
+          "forecast_days": "Voorspellingshorizon in dagen",
           "preferred_trip_duration": "Gewenste reisduur",
           "custom_trip_duration_days": "Aangepaste reisduur",
           "activity_profile": "Activiteitsprofiel",
@@ -53,10 +53,17 @@
   "options": {
     "step": {
       "init": {
-        "title": "RideRadar opties",
-        "description": "Kies wat je wilt wijzigen.",
+        "title": "RideRadar instellingen",
+        "description": "Huidige startlocatie: **{address}**. Coordinaten: **{latitude}**, **{longitude}**. Wijzig het adres of de plaatsnaam om een nieuw startpunt te zoeken; coordinaten worden alleen ter bevestiging getoond.",
         "data": {
-          "action": "Actie"
+          "start_address": "Startadres of plaats",
+          "max_route_distance_km": "Maximale routeafstand",
+          "forecast_days": "Voorspellingshorizon in dagen",
+          "preferred_trip_duration": "Gewenste reisduur",
+          "custom_trip_duration_days": "Aangepaste reisduur",
+          "activity_profile": "Activiteitsprofiel",
+          "detour_factor": "Omwegfactor voor fallback-route",
+          "enabled_destinations": "Ingeschakelde bestemmingen"
         }
       },
       "start_location": {
@@ -92,7 +99,7 @@
         "description": "Wijzig bereik, voorspelling, reisduur, activiteitsprofiel en routefallback.",
         "data": {
           "max_route_distance_km": "Maximale routeafstand",
-          "forecast_days": "Voorspellingsdagen",
+          "forecast_days": "Voorspellingshorizon in dagen",
           "preferred_trip_duration": "Gewenste reisduur",
           "custom_trip_duration_days": "Aangepaste reisduur",
           "activity_profile": "Activiteitsprofiel",

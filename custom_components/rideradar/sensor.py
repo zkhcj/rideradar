@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import date, timedelta
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorEntityDescription, SensorStateClass
@@ -99,6 +100,46 @@ async def async_setup_entry(
         RideRadarSensor(
             entry,
             coordinator,
+            SensorEntityDescription(key="best_opportunities", name="Best Opportunities", icon="mdi:calendar-star"),
+            lambda data: _opportunity_summary(data.get("opportunities")),
+            lambda data: {"opportunities": data.get("opportunities", [])},
+        ),
+        RideRadarSensor(
+            entry,
+            coordinator,
+            SensorEntityDescription(
+                key="best_weekend_opportunity",
+                name="Best Weekend Opportunity",
+                icon="mdi:calendar-weekend",
+            ),
+            lambda data: _single_opportunity_summary(data.get("best_weekend_opportunity")),
+            lambda data: {"opportunity": data.get("best_weekend_opportunity")},
+        ),
+        RideRadarSensor(
+            entry,
+            coordinator,
+            SensorEntityDescription(
+                key="best_weekday_opportunity",
+                name="Best Weekday Opportunity",
+                icon="mdi:calendar-week",
+            ),
+            lambda data: _single_opportunity_summary(data.get("best_weekday_opportunity")),
+            lambda data: {"opportunity": data.get("best_weekday_opportunity")},
+        ),
+        RideRadarSensor(
+            entry,
+            coordinator,
+            SensorEntityDescription(
+                key="best_next_available_opportunity",
+                name="Best Next Available Opportunity",
+                icon="mdi:calendar-clock",
+            ),
+            lambda data: _single_opportunity_summary(data.get("best_next_available_opportunity")),
+            lambda data: {"opportunity": data.get("best_next_available_opportunity")},
+        ),
+        RideRadarSensor(
+            entry,
+            coordinator,
             SensorEntityDescription(
                 key="destination_count",
                 name="Destination Count",
@@ -126,17 +167,26 @@ class RideRadarSensor(CoordinatorEntity[RideRadarDataCoordinator], SensorEntity)
         coordinator: RideRadarDataCoordinator,
         description: SensorEntityDescription,
         value_fn: Callable[[dict[str, object]], Any],
+        attrs_fn: Callable[[dict[str, object]], dict[str, Any]] | None = None,
     ) -> None:
         super().__init__(coordinator)
         self.entity_description = description
         self._attr_device_info = _device_info(entry)
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
         self._value_fn = value_fn
+        self._attrs_fn = attrs_fn
 
     @property
     def native_value(self) -> Any:
         """Return sensor value."""
         return self._value_fn(self.coordinator.data or {})
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return extra state attributes."""
+        if self._attrs_fn is None:
+            return {}
+        return self._attrs_fn(self.coordinator.data or {})
 
 
 class RideRadarDestinationSensor(CoordinatorEntity[RideRadarDataCoordinator], SensorEntity):
@@ -189,6 +239,10 @@ class RideRadarDestinationSensor(CoordinatorEntity[RideRadarDataCoordinator], Se
         return {
             "trip_score": result.trip_score,
             "best_trip_window": _trip_window_attributes(result),
+            "all_trip_windows": _trip_windows_attributes(result),
+            "next_good_window": _next_good_window(result),
+            "weekend_windows": _trip_windows_attributes(result, "weekend"),
+            "weekday_windows": _trip_windows_attributes(result, "weekday"),
             "best_start_day": result.best_start_day,
             "trip_duration": result.trip_duration,
             "weather_stability_score": result.weather_stability_score,
@@ -263,12 +317,41 @@ def _trip_window_attributes(result: DestinationResult) -> dict[str, Any] | None:
     window = result.best_trip_window
     if window is None:
         return None
+    return _window_attributes(result, window)
+
+
+def _trip_windows_attributes(result: DestinationResult, window_type: str | None = None) -> list[dict[str, Any]]:
+    windows = [_window_attributes(result, window) for window in result.all_trip_windows]
+    if window_type is None:
+        return windows
+    return [window for window in windows if window["window_type"] == window_type]
+
+
+def _next_good_window(result: DestinationResult) -> dict[str, Any] | None:
+    return next(
+        (window for window in _trip_windows_attributes(result) if int(window["trip_score"]) >= 70),
+        None,
+    )
+
+
+def _window_attributes(result: DestinationResult, window: Any) -> dict[str, Any]:
+    route = result.route
+    weekend = _is_weekend(window.start_day, window.end_day)
     return {
+        "destination": result.destination.name,
+        "start_date": window.start_day,
+        "end_date": window.end_day,
         "start_day": window.start_day,
         "end_day": window.end_day,
         "duration_days": window.duration_days,
         "trip_score": window.trip_score,
+        "stability_score": window.weather_stability_score,
         "daily_scores": window.daily_scores,
+        "route_distance_km": route.distance_km if route else None,
+        "estimated_travel_time": _format_minutes(route.travel_time_minutes) if route else None,
+        "verdict": _verdict(window.trip_score, weekend),
+        "explanation": window.trip_explanation,
+        "window_type": "weekend" if weekend else "weekday",
         "weather_stability_score": window.weather_stability_score,
         "stability_explanation": window.stability_explanation,
     }
@@ -285,3 +368,36 @@ def _breakdown_attributes(result: DestinationResult) -> dict[str, Any] | None:
         "bad_weather_penalty": breakdown.bad_weather_penalty,
         "duration_days": breakdown.duration_days,
     }
+
+
+def _opportunity_summary(value: object) -> str | None:
+    if not isinstance(value, list) or not value:
+        return None
+    return _single_opportunity_summary(value[0])
+
+
+def _single_opportunity_summary(value: object) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    return f"{value.get('destination')} from {value.get('start_date')}: {value.get('trip_score')}/100"
+
+
+def _is_weekend(start_value: str, end_value: str) -> bool:
+    try:
+        start = date.fromisoformat(start_value)
+        end = date.fromisoformat(end_value)
+    except ValueError:
+        return False
+    days = (end - start).days + 1
+    return any((start + timedelta(days=offset)).weekday() >= 5 for offset in range(days))
+
+
+def _verdict(score: int, weekend: bool) -> str:
+    suffix = " weekend" if weekend else " window"
+    if score >= 85:
+        return f"Excellent{suffix}"
+    if score >= 70:
+        return f"Good{suffix}"
+    if score >= 55:
+        return f"Marginal{suffix}"
+    return f"Poor{suffix}"

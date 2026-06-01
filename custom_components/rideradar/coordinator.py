@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -33,7 +34,7 @@ from .const import (
 from .destinations import destinations_from_config
 from .models import DestinationArea, DestinationResult, RideRadarConfigError
 from .routing import FallbackRoutingClient, RoutingClient
-from .scoring import calculate_best_trip_window, calculate_ride_score
+from .scoring import calculate_ride_score, calculate_trip_windows
 
 LOGGER = logging.getLogger(__name__)
 
@@ -87,6 +88,10 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             return {
                 "results": [],
                 "best": None,
+                "opportunities": [],
+                "best_weekend_opportunity": None,
+                "best_weekday_opportunity": None,
+                "best_next_available_opportunity": None,
                 "destination_count": 0,
                 "summary": "No enabled destinations configured",
             }
@@ -115,9 +120,14 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             key=lambda item: item.trip_score or 0,
             default=None,
         )
+        opportunities = _opportunities(results)
         return {
             "results": results,
             "best": best,
+            "opportunities": opportunities,
+            "best_weekend_opportunity": _best_matching_opportunity(opportunities, "weekend"),
+            "best_weekday_opportunity": _best_matching_opportunity(opportunities, "weekday"),
+            "best_next_available_opportunity": opportunities[0] if opportunities else None,
             "destination_count": len(results),
             "summary": _summary(best),
         }
@@ -157,6 +167,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 daily_scores={},
                 trip_score_breakdown=None,
                 trip_explanation="Outside configured range.",
+                all_trip_windows=[],
                 reachable=False,
                 available=True,
                 explanation=f"Outside configured range ({route.distance_km:.0f} km)",
@@ -171,7 +182,8 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         best_forecast = max(forecasts, key=lambda item: scores[item.date].score, default=None)
         best_score = scores[best_forecast.date].score if best_forecast else None
         best_day = best_forecast.date if best_forecast else None
-        best_trip_window = calculate_best_trip_window(forecasts, trip_duration, activity_profile)
+        all_trip_windows = calculate_trip_windows(forecasts, trip_duration, activity_profile)
+        best_trip_window = max(all_trip_windows, key=lambda window: window.trip_score, default=None)
         trip_explanation = (
             best_trip_window.trip_explanation
             if best_trip_window
@@ -197,6 +209,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             daily_scores={date: score.score for date, score in scores.items()},
             trip_score_breakdown=best_trip_window.trip_score_breakdown if best_trip_window else None,
             trip_explanation=trip_explanation,
+            all_trip_windows=all_trip_windows,
             reachable=True,
             available=bool(forecasts),
             explanation=explanation,
@@ -210,6 +223,63 @@ def _summary(best: DestinationResult | None) -> str:
         f"{best.destination.name}: {best.trip_score}/100 for a {best.trip_duration}-day trip "
         f"starting {best.best_start_day}. {best.trip_explanation}"
     )
+
+
+def _opportunities(results: list[DestinationResult]) -> list[dict[str, Any]]:
+    opportunities: list[dict[str, Any]] = []
+    for result in results:
+        if not result.reachable or result.route is None:
+            continue
+        for window in result.all_trip_windows:
+            opportunities.append(
+                {
+                    "destination": result.destination.name,
+                    "start_date": window.start_day,
+                    "end_date": window.end_day,
+                    "duration_days": window.duration_days,
+                    "trip_score": window.trip_score,
+                    "stability_score": window.weather_stability_score,
+                    "route_distance_km": result.route.distance_km,
+                    "estimated_travel_time": _format_minutes(result.route.travel_time_minutes),
+                    "daily_scores": window.daily_scores,
+                    "verdict": _window_verdict(window.trip_score, _is_weekend_window(window)),
+                    "explanation": window.trip_explanation,
+                    "window_type": "weekend" if _is_weekend_window(window) else "weekday",
+                }
+            )
+    return sorted(opportunities, key=lambda item: (-int(item["trip_score"]), str(item["start_date"])))
+
+
+def _best_matching_opportunity(opportunities: list[dict[str, Any]], window_type: str) -> dict[str, Any] | None:
+    return next((opportunity for opportunity in opportunities if opportunity["window_type"] == window_type), None)
+
+
+def _is_weekend_window(window: Any) -> bool:
+    try:
+        start = date.fromisoformat(window.start_day)
+        end = date.fromisoformat(window.end_day)
+    except ValueError:
+        return False
+    days = (end - start).days + 1
+    return any((start + timedelta(days=offset)).weekday() >= 5 for offset in range(days))
+
+
+def _window_verdict(score: int, weekend: bool = False) -> str:
+    suffix = " weekend" if weekend else " window"
+    if score >= 85:
+        return f"Excellent{suffix}"
+    if score >= 70:
+        return f"Good{suffix}"
+    if score >= 55:
+        return f"Marginal{suffix}"
+    return f"Poor{suffix}"
+
+
+def _format_minutes(minutes: int) -> str:
+    hours, remainder = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {remainder:02d}m"
+    return f"{remainder}m"
 
 
 def _trip_duration_from_config(config: dict[str, Any], forecast_days: int) -> int:

@@ -28,6 +28,7 @@ async def async_get_config_entry_diagnostics(
         "coordinator": {
             "last_update_success": getattr(coordinator, "last_update_success", None),
             "destination_count": data.get("destination_count"),
+            "opportunity_count": len(data.get("opportunities") or []),
             "summary": data.get("summary"),
         },
     }

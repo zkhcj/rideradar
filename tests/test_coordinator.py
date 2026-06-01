@@ -63,7 +63,7 @@ class DestinationForecastApiClient:
         ][:forecast_days]
 
 
-def _entry(destinations=None, max_distance=300):
+def _entry(destinations=None, max_distance=300, forecast_days=2):
     destination_data = destinations
     if destination_data is None:
         destination_data = [
@@ -76,7 +76,7 @@ def _entry(destinations=None, max_distance=300):
             CONF_START_LATITUDE: 50.0,
             CONF_START_LONGITUDE: 4.0,
             CONF_MAX_ROUTE_DISTANCE_KM: max_distance,
-            CONF_FORECAST_DAYS: 2,
+            CONF_FORECAST_DAYS: forecast_days,
             CONF_PREFERRED_TRIP_DURATION: DEFAULT_PREFERRED_TRIP_DURATION,
             CONF_CUSTOM_TRIP_DURATION_DAYS: DEFAULT_CUSTOM_TRIP_DURATION_DAYS,
             CONF_ACTIVITY_PROFILE: DEFAULT_ACTIVITY_PROFILE,
@@ -84,6 +84,10 @@ def _entry(destinations=None, max_distance=300):
             CONF_DESTINATIONS: destination_data,
         },
     )
+
+
+def _forecast_day(day, score_weather=1):
+    return DailyForecast(day, 22, 0, 0, 10, 15, 20, score_weather)
 
 
 async def test_coordinator_selects_best_destination(hass) -> None:
@@ -100,6 +104,8 @@ async def test_coordinator_selects_best_destination(hass) -> None:
     assert data["best"].destination.name == "Test Destination"
     assert data["best"].best_start_day == "2026-06-02"
     assert data["best"].trip_score is not None
+    assert data["opportunities"]
+    assert data["best_next_available_opportunity"]["destination"] == "Test Destination"
     assert "Test Destination" in data["summary"]
 
 
@@ -119,6 +125,31 @@ async def test_coordinator_ranks_destinations_by_trip_score(hass) -> None:
 
     assert data["best"].destination.name == "Stable Trip"
     assert data["best"].trip_score > data["results"][0].trip_score
+
+
+async def test_coordinator_exposes_availability_windows_across_forecast_horizon(hass) -> None:
+    forecasts = [
+        _forecast_day("2026-06-04"),
+        _forecast_day("2026-06-05"),
+        _forecast_day("2026-06-06"),
+        _forecast_day("2026-06-07"),
+    ]
+    entry = _entry(forecast_days=4)
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        entry,
+        FakeApiClient(forecasts=forecasts),
+        FakeRoutingClient(distance_km=100),
+    )
+
+    data = await coordinator._async_update_data()
+
+    result = data["results"][0]
+    assert len(result.all_trip_windows) == 3
+    assert len(data["opportunities"]) == 3
+    assert data["opportunities"][0]["route_distance_km"] == 100
+    assert data["best_weekend_opportunity"]["start_date"] == "2026-06-05"
+    assert data["best_weekday_opportunity"]["start_date"] == "2026-06-04"
 
 
 async def test_coordinator_handles_empty_destination_list(hass) -> None:
