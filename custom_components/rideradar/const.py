@@ -20,6 +20,8 @@ CONF_MAX_ROUTE_DISTANCE_KM: Final = "max_route_distance_km"
 CONF_FORECAST_DAYS: Final = "forecast_days"
 CONF_ACTIVITY_PROFILE: Final = "activity_profile"
 CONF_DESTINATIONS: Final = "destinations"
+CONF_ENABLED_DEFAULT_DESTINATIONS: Final = "enabled_default_destinations"
+CONF_CUSTOM_DESTINATIONS: Final = "custom_destinations"
 CONF_DETOUR_FACTOR: Final = "detour_factor"
 
 DEFAULT_FORECAST_DAYS: Final = 3
@@ -39,6 +41,7 @@ MIN_LONGITUDE: Final = -180.0
 MAX_LONGITUDE: Final = 180.0
 MIN_ROUTE_DISTANCE_KM: Final = 1.0
 MAX_ROUTE_DISTANCE_KM_LIMIT: Final = 5000.0
+MIN_GEOCODE_QUERY_LENGTH: Final = 3
 
 UPDATE_INTERVAL: Final = timedelta(hours=3)
 

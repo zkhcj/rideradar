@@ -7,7 +7,7 @@ from typing import Any
 from aiohttp import ClientError, ClientResponseError, ClientSession, ContentTypeError
 from homeassistant.exceptions import HomeAssistantError
 
-from .const import OPEN_METEO_FORECAST_URL, OPEN_METEO_GEOCODING_URL
+from .const import OPEN_METEO_FORECAST_URL
 from .models import DailyForecast
 
 
@@ -20,19 +20,6 @@ class OpenMeteoClient:
 
     def __init__(self, session: ClientSession) -> None:
         self._session = session
-
-    async def geocode(self, address: str) -> tuple[float, float] | None:
-        """Resolve an address or place name to latitude/longitude."""
-        params = {"name": address, "count": 1, "language": "en", "format": "json"}
-        payload = await self._get_json(OPEN_METEO_GEOCODING_URL, params, "geocode start address")
-        results = payload.get("results") or []
-        if not results:
-            return None
-        first = results[0]
-        try:
-            return float(first["latitude"]), float(first["longitude"])
-        except (KeyError, TypeError, ValueError) as err:
-            raise RideRadarApiError("Open-Meteo geocoding response did not include coordinates") from err
 
     async def get_daily_forecast(
         self,

@@ -2,31 +2,55 @@
   "config": {
     "step": {
       "user": {
-        "title": "RideRadar",
-        "description": "Configureer startlocatie, bereik, voorspelling, routefallback en bewerkbare bestemmingsgebieden.",
+        "title": "RideRadar startlocatie",
+        "description": "Voer een startadres of plaatsnaam in. RideRadar zoekt automatisch de coordinaten op.",
         "data": {
-          "start_address": "Startadres",
+          "start_address": "Startadres of plaats",
+          "manual_mode": "Geavanceerd: coordinaten handmatig invoeren"
+        }
+      },
+      "choose_location": {
+        "title": "Kies startlocatie",
+        "description": "Selecteer de locatie die bij je startpunt hoort.",
+        "data": {
+          "location": "Gevonden locatie"
+        }
+      },
+      "confirm_location": {
+        "title": "Bevestig startlocatie",
+        "description": "RideRadar heeft **{address}** gevonden op breedtegraad **{latitude}** en lengtegraad **{longitude}**.",
+        "data": {}
+      },
+      "manual_location": {
+        "title": "Handmatige startcoordinaten",
+        "description": "Gebruik dit alleen als de adreszoeker je startlocatie niet vindt.",
+        "data": {
+          "start_address": "Locatielabel",
           "start_latitude": "Startbreedtegraad",
-          "start_longitude": "Startlengtegraad",
+          "start_longitude": "Startlengtegraad"
+        }
+      },
+      "settings": {
+        "title": "RideRadar ritinstellingen",
+        "description": "Kies bereik, voorspelling, activiteitsprofiel en standaard bestemmingsgebieden.",
+        "data": {
           "max_route_distance_km": "Maximale routeafstand",
           "forecast_days": "Voorspellingsdagen",
           "activity_profile": "Activiteitsprofiel",
           "detour_factor": "Omwegfactor voor fallback-route",
-          "destinations": "Bestemmingsgebieden JSON"
+          "enabled_default_destinations": "Ingeschakelde standaardbestemmingen"
         }
       }
     },
     "error": {
-      "address_or_coordinates_required": "Voer een startadres of beide coordinaten in.",
-      "address_not_found": "Het startadres kon niet worden gevonden.",
-      "coordinates_required": "Voer zowel breedtegraad als lengtegraad in.",
-      "geocoding_failed": "Geocoding is mislukt. Probeer later opnieuw of voer coordinaten in.",
+      "address_not_found": "Er is geen passende locatie gevonden.",
+      "geocoding_failed": "Locatie opzoeken is mislukt. Probeer later opnieuw of gebruik handmatige coordinaten.",
       "invalid_activity_profile": "Selecteer een ondersteund activiteitsprofiel.",
       "invalid_coordinates": "Coordinaten zijn ongeldig of buiten het ondersteunde bereik.",
-      "invalid_destinations": "Bestemmingsgebieden moeten geldige JSON zijn met de vereiste velden.",
       "invalid_detour_factor": "De omwegfactor moet binnen het ondersteunde bereik liggen.",
       "invalid_forecast_days": "Voorspellingsdagen moet binnen het ondersteunde bereik liggen.",
-      "invalid_range": "Maximale routeafstand moet binnen het ondersteunde bereik liggen."
+      "invalid_range": "Maximale routeafstand moet binnen het ondersteunde bereik liggen.",
+      "query_too_short": "Voer minimaal 3 tekens in."
     },
     "abort": {
       "already_configured": "RideRadar is al geconfigureerd."
@@ -36,30 +60,103 @@
     "step": {
       "init": {
         "title": "RideRadar opties",
-        "description": "Wijzig startlocatie, bereik, voorspelling, routefallback of bestemmingsgebieden.",
+        "description": "Kies wat je wilt wijzigen.",
         "data": {
-          "start_address": "Startadres",
+          "action": "Actie"
+        }
+      },
+      "start_location": {
+        "title": "Startlocatie wijzigen",
+        "description": "Voer een nieuw startadres of plaatsnaam in. RideRadar zoekt automatisch de coordinaten op.",
+        "data": {
+          "start_address": "Startadres of plaats",
+          "manual_mode": "Geavanceerd: coordinaten handmatig invoeren"
+        }
+      },
+      "choose_location": {
+        "title": "Kies startlocatie",
+        "description": "Selecteer de locatie die bij je startpunt hoort.",
+        "data": {
+          "location": "Gevonden locatie"
+        }
+      },
+      "manual_location": {
+        "title": "Handmatige startcoordinaten",
+        "description": "Gebruik dit alleen als de adreszoeker je startlocatie niet vindt.",
+        "data": {
+          "start_address": "Locatielabel",
           "start_latitude": "Startbreedtegraad",
-          "start_longitude": "Startlengtegraad",
+          "start_longitude": "Startlengtegraad"
+        }
+      },
+      "settings": {
+        "title": "Ritinstellingen",
+        "description": "Wijzig bereik, voorspelling, activiteitsprofiel en routefallback.",
+        "data": {
           "max_route_distance_km": "Maximale routeafstand",
           "forecast_days": "Voorspellingsdagen",
           "activity_profile": "Activiteitsprofiel",
-          "detour_factor": "Omwegfactor voor fallback-route",
-          "destinations": "Bestemmingsgebieden JSON"
+          "detour_factor": "Omwegfactor voor fallback-route"
+        }
+      },
+      "destinations": {
+        "title": "Bestemmingen in- of uitschakelen",
+        "description": "Selecteer alle bestemmingsgebieden die RideRadar moet beoordelen.",
+        "data": {
+          "enabled_destinations": "Ingeschakelde bestemmingen"
+        }
+      },
+      "add_custom_destination": {
+        "title": "Eigen bestemming toevoegen",
+        "description": "Voer bestemmingsgegevens en een adres/plaats in om coordinaten te zoeken.",
+        "data": {
+          "destination_name": "Naam",
+          "country_region": "Land of regio",
+          "address": "Adres of plaats",
+          "enabled": "Ingeschakeld",
+          "notes": "Notities"
+        }
+      },
+      "choose_custom_location": {
+        "title": "Kies locatie voor eigen bestemming",
+        "description": "Selecteer de locatie die bij de eigen bestemming hoort.",
+        "data": {
+          "location": "Gevonden locatie"
+        }
+      },
+      "remove_custom_destination": {
+        "title": "Eigen bestemmingen verwijderen",
+        "description": "Selecteer eigen bestemmingen om te verwijderen.",
+        "data": {
+          "custom_destinations": "Eigen bestemmingen"
+        }
+      },
+      "reset_defaults": {
+        "title": "Bestemmingen resetten",
+        "description": "Dit schakelt alle standaardbestemmingen in en verwijdert eigen bestemmingen.",
+        "data": {}
+      },
+      "advanced_import_export": {
+        "title": "Geavanceerde import/export",
+        "description": "Alleen geavanceerd: plak gestructureerde bestemmings-JSON om eigen bestemmingen te vervangen.",
+        "data": {
+          "destinations_json": "Eigen bestemmingen JSON"
         }
       }
     },
     "error": {
-      "address_or_coordinates_required": "Voer een startadres of beide coordinaten in.",
-      "address_not_found": "Het startadres kon niet worden gevonden.",
-      "coordinates_required": "Voer zowel breedtegraad als lengtegraad in.",
-      "geocoding_failed": "Geocoding is mislukt. Probeer later opnieuw of voer coordinaten in.",
+      "address_not_found": "Er is geen passende locatie gevonden.",
+      "geocoding_failed": "Locatie opzoeken is mislukt. Probeer later opnieuw of gebruik handmatige coordinaten.",
       "invalid_activity_profile": "Selecteer een ondersteund activiteitsprofiel.",
       "invalid_coordinates": "Coordinaten zijn ongeldig of buiten het ondersteunde bereik.",
-      "invalid_destinations": "Bestemmingsgebieden moeten geldige JSON zijn met de vereiste velden.",
+      "invalid_destinations": "Bestemmingsgegevens moeten geldige gestructureerde JSON zijn.",
       "invalid_detour_factor": "De omwegfactor moet binnen het ondersteunde bereik liggen.",
       "invalid_forecast_days": "Voorspellingsdagen moet binnen het ondersteunde bereik liggen.",
-      "invalid_range": "Maximale routeafstand moet binnen het ondersteunde bereik liggen."
+      "invalid_range": "Maximale routeafstand moet binnen het ondersteunde bereik liggen.",
+      "query_too_short": "Voer minimaal 3 tekens in."
+    },
+    "abort": {
+      "no_custom_destinations": "Er zijn geen eigen bestemmingen om te verwijderen."
     }
   }
 }

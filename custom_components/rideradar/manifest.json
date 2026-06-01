@@ -10,5 +10,5 @@
   "issue_tracker": "https://github.com/zkhcj/rideradar/issues",
   "loggers": ["custom_components.rideradar"],
   "requirements": [],
-  "version": "0.1.0"
+  "version": "0.1.1"
 }

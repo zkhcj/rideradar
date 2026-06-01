@@ -2,31 +2,55 @@
   "config": {
     "step": {
       "user": {
-        "title": "RideRadar",
-        "description": "Configure start location, range, forecast window, route fallback, and editable destination areas.",
+        "title": "RideRadar start location",
+        "description": "Enter a start address or place name. RideRadar will resolve it to coordinates before saving.",
         "data": {
-          "start_address": "Start address",
+          "start_address": "Start address or place",
+          "manual_mode": "Advanced: enter coordinates manually"
+        }
+      },
+      "choose_location": {
+        "title": "Choose start location",
+        "description": "Select the location that matches your start point.",
+        "data": {
+          "location": "Resolved location"
+        }
+      },
+      "confirm_location": {
+        "title": "Confirm start location",
+        "description": "RideRadar resolved **{address}** to latitude **{latitude}** and longitude **{longitude}**.",
+        "data": {}
+      },
+      "manual_location": {
+        "title": "Manual start coordinates",
+        "description": "Use this only when address lookup cannot find your start location.",
+        "data": {
+          "start_address": "Location label",
           "start_latitude": "Start latitude",
-          "start_longitude": "Start longitude",
+          "start_longitude": "Start longitude"
+        }
+      },
+      "settings": {
+        "title": "RideRadar trip settings",
+        "description": "Choose your ride range, forecast window, activity profile, and default destination areas.",
+        "data": {
           "max_route_distance_km": "Maximum route distance",
           "forecast_days": "Forecast days",
           "activity_profile": "Activity profile",
           "detour_factor": "Fallback route detour factor",
-          "destinations": "Destination areas JSON"
+          "enabled_default_destinations": "Enabled default destinations"
         }
       }
     },
     "error": {
-      "address_or_coordinates_required": "Enter a start address or both coordinates.",
-      "address_not_found": "The start address could not be resolved.",
-      "coordinates_required": "Enter both latitude and longitude.",
-      "geocoding_failed": "Geocoding failed. Try again later or enter coordinates.",
+      "address_not_found": "No matching location was found.",
+      "geocoding_failed": "Location lookup failed. Try again later or use manual coordinates.",
       "invalid_activity_profile": "Select a supported activity profile.",
       "invalid_coordinates": "Coordinates are invalid or outside the supported range.",
-      "invalid_destinations": "Destination areas must be valid JSON with the required fields.",
       "invalid_detour_factor": "Detour factor must be within the supported range.",
       "invalid_forecast_days": "Forecast days must be within the supported range.",
-      "invalid_range": "Maximum route distance must be within the supported range."
+      "invalid_range": "Maximum route distance must be within the supported range.",
+      "query_too_short": "Enter at least 3 characters."
     },
     "abort": {
       "already_configured": "RideRadar is already configured."
@@ -36,30 +60,103 @@
     "step": {
       "init": {
         "title": "RideRadar options",
-        "description": "Change start location, range, forecast window, route fallback, or destination areas.",
+        "description": "Choose what you want to change.",
         "data": {
-          "start_address": "Start address",
+          "action": "Action"
+        }
+      },
+      "start_location": {
+        "title": "Change start location",
+        "description": "Enter a new start address or place name. RideRadar will resolve it to coordinates.",
+        "data": {
+          "start_address": "Start address or place",
+          "manual_mode": "Advanced: enter coordinates manually"
+        }
+      },
+      "choose_location": {
+        "title": "Choose start location",
+        "description": "Select the location that matches your start point.",
+        "data": {
+          "location": "Resolved location"
+        }
+      },
+      "manual_location": {
+        "title": "Manual start coordinates",
+        "description": "Use this only when address lookup cannot find your start location.",
+        "data": {
+          "start_address": "Location label",
           "start_latitude": "Start latitude",
-          "start_longitude": "Start longitude",
+          "start_longitude": "Start longitude"
+        }
+      },
+      "settings": {
+        "title": "Trip settings",
+        "description": "Change range, forecast days, activity profile, and route-distance fallback.",
+        "data": {
           "max_route_distance_km": "Maximum route distance",
           "forecast_days": "Forecast days",
           "activity_profile": "Activity profile",
-          "detour_factor": "Fallback route detour factor",
-          "destinations": "Destination areas JSON"
+          "detour_factor": "Fallback route detour factor"
+        }
+      },
+      "destinations": {
+        "title": "Enable or disable destinations",
+        "description": "Select every destination area RideRadar should evaluate.",
+        "data": {
+          "enabled_destinations": "Enabled destinations"
+        }
+      },
+      "add_custom_destination": {
+        "title": "Add custom destination",
+        "description": "Enter destination details and a place/address to resolve to coordinates.",
+        "data": {
+          "destination_name": "Name",
+          "country_region": "Country or region",
+          "address": "Address or place",
+          "enabled": "Enabled",
+          "notes": "Notes"
+        }
+      },
+      "choose_custom_location": {
+        "title": "Choose custom destination location",
+        "description": "Select the location that matches the custom destination.",
+        "data": {
+          "location": "Resolved location"
+        }
+      },
+      "remove_custom_destination": {
+        "title": "Remove custom destinations",
+        "description": "Select custom destinations to remove.",
+        "data": {
+          "custom_destinations": "Custom destinations"
+        }
+      },
+      "reset_defaults": {
+        "title": "Reset destinations",
+        "description": "This enables all default destinations and removes custom destinations.",
+        "data": {}
+      },
+      "advanced_import_export": {
+        "title": "Advanced destination import/export",
+        "description": "Advanced only: paste structured destination JSON to replace custom destinations.",
+        "data": {
+          "destinations_json": "Custom destinations JSON"
         }
       }
     },
     "error": {
-      "address_or_coordinates_required": "Enter a start address or both coordinates.",
-      "address_not_found": "The start address could not be resolved.",
-      "coordinates_required": "Enter both latitude and longitude.",
-      "geocoding_failed": "Geocoding failed. Try again later or enter coordinates.",
+      "address_not_found": "No matching location was found.",
+      "geocoding_failed": "Location lookup failed. Try again later or use manual coordinates.",
       "invalid_activity_profile": "Select a supported activity profile.",
       "invalid_coordinates": "Coordinates are invalid or outside the supported range.",
-      "invalid_destinations": "Destination areas must be valid JSON with the required fields.",
+      "invalid_destinations": "Destination data must be valid structured JSON.",
       "invalid_detour_factor": "Detour factor must be within the supported range.",
       "invalid_forecast_days": "Forecast days must be within the supported range.",
-      "invalid_range": "Maximum route distance must be within the supported range."
+      "invalid_range": "Maximum route distance must be within the supported range.",
+      "query_too_short": "Enter at least 3 characters."
+    },
+    "abort": {
+      "no_custom_destinations": "There are no custom destinations to remove."
     }
   }
 }

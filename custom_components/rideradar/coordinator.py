@@ -12,7 +12,6 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .api import OpenMeteoClient, RideRadarApiError
 from .const import (
     CONF_ACTIVITY_PROFILE,
-    CONF_DESTINATIONS,
     CONF_DETOUR_FACTOR,
     CONF_FORECAST_DAYS,
     CONF_MAX_ROUTE_DISTANCE_KM,
@@ -72,7 +71,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             max_route_distance_km = float(config.get(CONF_MAX_ROUTE_DISTANCE_KM, DEFAULT_MAX_ROUTE_DISTANCE_KM))
             forecast_days = int(config.get(CONF_FORECAST_DAYS, DEFAULT_FORECAST_DAYS))
             activity_profile = str(config.get(CONF_ACTIVITY_PROFILE, DEFAULT_ACTIVITY_PROFILE))
-            destinations = destinations_from_config(config.get(CONF_DESTINATIONS))
+            destinations = destinations_from_config(config)
         except (KeyError, TypeError, ValueError, RideRadarConfigError) as err:
             raise UpdateFailed(f"Invalid RideRadar configuration: {err}") from err
 
