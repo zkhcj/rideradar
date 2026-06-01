@@ -155,7 +155,7 @@ async def test_config_flow_rejects_short_start_query(hass, monkeypatch) -> None:
     assert result["errors"][CONF_START_ADDRESS] == "query_too_short"
 
 
-async def test_config_flow_manual_location_is_advanced_path(hass, monkeypatch) -> None:
+async def test_config_flow_start_location_uses_search_as_primary_path(hass, monkeypatch) -> None:
     _patch_setup(monkeypatch)
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
@@ -163,12 +163,10 @@ async def test_config_flow_manual_location_is_advanced_path(hass, monkeypatch) -
         data={CONF_START_ADDRESS: "Manual", "manual_mode": True},
     )
 
-    assert result["step_id"] == "manual_location"
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        user_input={CONF_START_ADDRESS: "Manual", CONF_START_LATITUDE: 51.0, CONF_START_LONGITUDE: 5.0},
-    )
-    assert result["step_id"] == "settings"
+    assert result["step_id"] == "confirm_location"
+    assert result["description_placeholders"]["address"] == "Brussels, Belgium"
+    assert result["description_placeholders"]["latitude"] == "50.85030"
+    assert result["description_placeholders"]["longitude"] == "4.35170"
 
 
 async def test_config_flow_saves_custom_trip_duration(hass, monkeypatch) -> None:
@@ -210,6 +208,41 @@ async def test_options_flow_edits_enabled_destinations(hass, monkeypatch) -> Non
     )
     assert result["type"] == "create_entry"
     assert result["data"][CONF_ENABLED_DEFAULT_DESTINATIONS] == ["Sauerland", "Eifel"]
+
+
+async def test_options_flow_confirms_changed_start_location(hass, monkeypatch) -> None:
+    _patch_setup(monkeypatch)
+    entry = _entry()
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"action": "start_location"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={CONF_START_ADDRESS: "Brussels"}
+    )
+
+    assert result["step_id"] == "confirm_location"
+    assert result["description_placeholders"]["address"] == "Brussels, Belgium"
+    assert result["description_placeholders"]["latitude"] == "50.85030"
+
+    result = await hass.config_entries.options.async_configure(result["flow_id"], user_input={})
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_START_ADDRESS] == "Brussels, Belgium"
+
+
+async def test_options_flow_allows_manual_coordinates_only_as_advanced_action(hass, monkeypatch) -> None:
+    _patch_setup(monkeypatch)
+    entry = _entry()
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"action": "manual_start_location"}
+    )
+
+    assert result["step_id"] == "manual_start_location"
 
 
 async def test_options_flow_adds_and_removes_custom_destination(hass, monkeypatch) -> None:

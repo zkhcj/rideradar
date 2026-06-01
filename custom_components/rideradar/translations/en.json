@@ -3,32 +3,22 @@
     "step": {
       "user": {
         "title": "RideRadar start location",
-        "description": "Enter a start address or place name. RideRadar will resolve it to coordinates before saving.",
+        "description": "Search for the place where your rides usually start. You can use a city, village, address, or landmark. Examples: `Brussels`, `Luxembourg City`, `Aachen Hbf`, `Market Square Maastricht`. RideRadar will show the resolved address and coordinates before saving.",
         "data": {
-          "start_address": "Start address or place",
-          "manual_mode": "Advanced: enter coordinates manually"
+          "start_address": "Start address or place"
         }
       },
       "choose_location": {
         "title": "Choose start location",
-        "description": "Select the location that matches your start point.",
+        "description": "Several places matched your search. Choose the one RideRadar should use as your trip start.",
         "data": {
           "location": "Resolved location"
         }
       },
       "confirm_location": {
         "title": "Confirm start location",
-        "description": "RideRadar resolved **{address}** to latitude **{latitude}** and longitude **{longitude}**.",
+        "description": "RideRadar found **{address}**. Coordinates: **{latitude}**, **{longitude}**. Continue only if this is the right start point.",
         "data": {}
-      },
-      "manual_location": {
-        "title": "Manual start coordinates",
-        "description": "Use this only when address lookup cannot find your start location.",
-        "data": {
-          "start_address": "Location label",
-          "start_latitude": "Start latitude",
-          "start_longitude": "Start longitude"
-        }
       },
       "settings": {
         "title": "RideRadar trip settings",
@@ -45,8 +35,9 @@
       }
     },
     "error": {
-      "address_not_found": "No matching location was found.",
-      "geocoding_failed": "Location lookup failed. Try again later or use manual coordinates.",
+      "address_not_found": "No matching location was found. Try a nearby town, a larger city, or add the country name.",
+      "geocoding_failed": "Location lookup failed. Try again later or search for a nearby town.",
+      "invalid_location_choice": "Choose one of the resolved locations.",
       "invalid_activity_profile": "Select a supported activity profile.",
       "invalid_coordinates": "Coordinates are invalid or outside the supported range.",
       "invalid_detour_factor": "Detour factor must be within the supported range.",
@@ -70,22 +61,26 @@
       },
       "start_location": {
         "title": "Change start location",
-        "description": "Enter a new start address or place name. RideRadar will resolve it to coordinates.",
+        "description": "Search for a new trip start. Examples: `Brussels`, `Luxembourg City`, `Aachen Hbf`, `Market Square Maastricht`. RideRadar will show the resolved address and coordinates before saving.",
         "data": {
-          "start_address": "Start address or place",
-          "manual_mode": "Advanced: enter coordinates manually"
+          "start_address": "Start address or place"
         }
       },
       "choose_location": {
         "title": "Choose start location",
-        "description": "Select the location that matches your start point.",
+        "description": "Several places matched your search. Choose the one RideRadar should use as your trip start.",
         "data": {
           "location": "Resolved location"
         }
       },
-      "manual_location": {
+      "confirm_location": {
+        "title": "Confirm start location",
+        "description": "RideRadar found **{address}**. Coordinates: **{latitude}**, **{longitude}**. Continue only if this is the right start point.",
+        "data": {}
+      },
+      "manual_start_location": {
         "title": "Manual start coordinates",
-        "description": "Use this only when address lookup cannot find your start location.",
+        "description": "Advanced fallback only. Prefer searching by place name first so RideRadar can confirm the resolved address.",
         "data": {
           "start_address": "Location label",
           "start_latitude": "Start latitude",
@@ -150,13 +145,14 @@
       }
     },
     "error": {
-      "address_not_found": "No matching location was found.",
-      "geocoding_failed": "Location lookup failed. Try again later or use manual coordinates.",
+      "address_not_found": "No matching location was found. Try a nearby town, a larger city, or add the country name.",
+      "geocoding_failed": "Location lookup failed. Try again later or search for a nearby town.",
       "invalid_activity_profile": "Select a supported activity profile.",
       "invalid_coordinates": "Coordinates are invalid or outside the supported range.",
       "invalid_destinations": "Destination data must be valid structured JSON.",
       "invalid_detour_factor": "Detour factor must be within the supported range.",
       "invalid_forecast_days": "Forecast days must be within the supported range.",
+      "invalid_location_choice": "Choose one of the resolved locations.",
       "invalid_trip_duration": "Trip duration must fit within the available forecast range.",
       "invalid_range": "Maximum route distance must be within the supported range.",
       "query_too_short": "Enter at least 3 characters."

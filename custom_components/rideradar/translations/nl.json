@@ -3,32 +3,22 @@
     "step": {
       "user": {
         "title": "RideRadar startlocatie",
-        "description": "Voer een startadres of plaatsnaam in. RideRadar zoekt automatisch de coordinaten op.",
+        "description": "Zoek de plek waar je ritten meestal starten. Gebruik een stad, dorp, adres of herkenningspunt. Voorbeelden: `Brussel`, `Luxemburg Stad`, `Aachen Hbf`, `Markt Maastricht`. RideRadar toont het gevonden adres en de coordinaten voordat dit wordt opgeslagen.",
         "data": {
-          "start_address": "Startadres of plaats",
-          "manual_mode": "Geavanceerd: coordinaten handmatig invoeren"
+          "start_address": "Startadres of plaats"
         }
       },
       "choose_location": {
         "title": "Kies startlocatie",
-        "description": "Selecteer de locatie die bij je startpunt hoort.",
+        "description": "Er zijn meerdere locaties gevonden. Kies de plek die RideRadar als startpunt moet gebruiken.",
         "data": {
           "location": "Gevonden locatie"
         }
       },
       "confirm_location": {
         "title": "Bevestig startlocatie",
-        "description": "RideRadar heeft **{address}** gevonden op breedtegraad **{latitude}** en lengtegraad **{longitude}**.",
+        "description": "RideRadar heeft **{address}** gevonden. Coordinaten: **{latitude}**, **{longitude}**. Ga alleen door als dit het juiste startpunt is.",
         "data": {}
-      },
-      "manual_location": {
-        "title": "Handmatige startcoordinaten",
-        "description": "Gebruik dit alleen als de adreszoeker je startlocatie niet vindt.",
-        "data": {
-          "start_address": "Locatielabel",
-          "start_latitude": "Startbreedtegraad",
-          "start_longitude": "Startlengtegraad"
-        }
       },
       "settings": {
         "title": "RideRadar ritinstellingen",
@@ -45,8 +35,9 @@
       }
     },
     "error": {
-      "address_not_found": "Er is geen passende locatie gevonden.",
-      "geocoding_failed": "Locatie opzoeken is mislukt. Probeer later opnieuw of gebruik handmatige coordinaten.",
+      "address_not_found": "Er is geen passende locatie gevonden. Probeer een nabijgelegen plaats, grotere stad of voeg het land toe.",
+      "geocoding_failed": "Locatie opzoeken is mislukt. Probeer later opnieuw of zoek naar een nabijgelegen plaats.",
+      "invalid_location_choice": "Kies een van de gevonden locaties.",
       "invalid_activity_profile": "Selecteer een ondersteund activiteitsprofiel.",
       "invalid_coordinates": "Coordinaten zijn ongeldig of buiten het ondersteunde bereik.",
       "invalid_detour_factor": "De omwegfactor moet binnen het ondersteunde bereik liggen.",
@@ -70,22 +61,26 @@
       },
       "start_location": {
         "title": "Startlocatie wijzigen",
-        "description": "Voer een nieuw startadres of plaatsnaam in. RideRadar zoekt automatisch de coordinaten op.",
+        "description": "Zoek een nieuw startpunt. Voorbeelden: `Brussel`, `Luxemburg Stad`, `Aachen Hbf`, `Markt Maastricht`. RideRadar toont het gevonden adres en de coordinaten voordat dit wordt opgeslagen.",
         "data": {
-          "start_address": "Startadres of plaats",
-          "manual_mode": "Geavanceerd: coordinaten handmatig invoeren"
+          "start_address": "Startadres of plaats"
         }
       },
       "choose_location": {
         "title": "Kies startlocatie",
-        "description": "Selecteer de locatie die bij je startpunt hoort.",
+        "description": "Er zijn meerdere locaties gevonden. Kies de plek die RideRadar als startpunt moet gebruiken.",
         "data": {
           "location": "Gevonden locatie"
         }
       },
-      "manual_location": {
+      "confirm_location": {
+        "title": "Bevestig startlocatie",
+        "description": "RideRadar heeft **{address}** gevonden. Coordinaten: **{latitude}**, **{longitude}**. Ga alleen door als dit het juiste startpunt is.",
+        "data": {}
+      },
+      "manual_start_location": {
         "title": "Handmatige startcoordinaten",
-        "description": "Gebruik dit alleen als de adreszoeker je startlocatie niet vindt.",
+        "description": "Alleen als geavanceerde fallback. Zoek bij voorkeur eerst op plaatsnaam zodat RideRadar het gevonden adres kan bevestigen.",
         "data": {
           "start_address": "Locatielabel",
           "start_latitude": "Startbreedtegraad",
@@ -150,13 +145,14 @@
       }
     },
     "error": {
-      "address_not_found": "Er is geen passende locatie gevonden.",
-      "geocoding_failed": "Locatie opzoeken is mislukt. Probeer later opnieuw of gebruik handmatige coordinaten.",
+      "address_not_found": "Er is geen passende locatie gevonden. Probeer een nabijgelegen plaats, grotere stad of voeg het land toe.",
+      "geocoding_failed": "Locatie opzoeken is mislukt. Probeer later opnieuw of zoek naar een nabijgelegen plaats.",
       "invalid_activity_profile": "Selecteer een ondersteund activiteitsprofiel.",
       "invalid_coordinates": "Coordinaten zijn ongeldig of buiten het ondersteunde bereik.",
       "invalid_destinations": "Bestemmingsgegevens moeten geldige gestructureerde JSON zijn.",
       "invalid_detour_factor": "De omwegfactor moet binnen het ondersteunde bereik liggen.",
       "invalid_forecast_days": "Voorspellingsdagen moet binnen het ondersteunde bereik liggen.",
+      "invalid_location_choice": "Kies een van de gevonden locaties.",
       "invalid_trip_duration": "Reisduur moet binnen de beschikbare voorspelling passen.",
       "invalid_range": "Maximale routeafstand moet binnen het ondersteunde bereik liggen.",
       "query_too_short": "Voer minimaal 3 tekens in."

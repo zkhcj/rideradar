@@ -77,9 +77,9 @@ FIELD_COUNTRY_REGION = "country_region"
 FIELD_ENABLED = "enabled"
 FIELD_NOTES = "notes"
 FIELD_IMPORT_EXPORT_JSON = "destinations_json"
-FIELD_MANUAL_MODE = "manual_mode"
 
 ACTION_START = "start_location"
+ACTION_MANUAL_START = "manual_start_location"
 ACTION_SETTINGS = "settings"
 ACTION_DESTINATIONS = "destinations"
 ACTION_ADD_CUSTOM = "add_custom_destination"
@@ -102,12 +102,9 @@ class RideRadarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self,
         user_input: dict[str, Any] | None = None,
     ) -> config_entries.ConfigFlowResult:
-        """Collect a start address or route to manual coordinate entry."""
+        """Collect a start address or place name."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            if user_input.get(FIELD_MANUAL_MODE):
-                self._data[CONF_START_ADDRESS] = str(user_input.get(CONF_START_ADDRESS, "")).strip()
-                return await self.async_step_manual_location()
             query = str(user_input.get(CONF_START_ADDRESS, "")).strip()
             if len(query) < MIN_GEOCODE_QUERY_LENGTH:
                 errors[CONF_START_ADDRESS] = "query_too_short"
@@ -126,7 +123,6 @@ class RideRadarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_START_ADDRESS): TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT)),
-                    vol.Optional(FIELD_MANUAL_MODE, default=False): BooleanSelector(),
                 }
             ),
             errors=errors,
@@ -137,21 +133,25 @@ class RideRadarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         user_input: dict[str, Any] | None = None,
     ) -> config_entries.ConfigFlowResult:
         """Let the user choose among geocoding matches."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self._store_start_location(self._location_results[int(user_input[FIELD_LOCATION])])
-            return await self.async_step_confirm_location()
+            result = _selected_location_result(self._location_results, user_input.get(FIELD_LOCATION), errors)
+            if result is not None:
+                self._store_start_location(result)
+                return await self.async_step_confirm_location()
         return self.async_show_form(
             step_id="choose_location",
             data_schema=vol.Schema(
                 {
                     vol.Required(FIELD_LOCATION): SelectSelector(
                         SelectSelectorConfig(
-                            options=[result.as_option(index) for index, result in enumerate(self._location_results)],
+                            options=_location_options(self._location_results),
                             mode=SelectSelectorMode.DROPDOWN,
                         )
                     )
                 }
             ),
+            errors=errors,
         )
 
     async def async_step_confirm_location(
@@ -169,42 +169,6 @@ class RideRadarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "longitude": f"{float(self._data[CONF_START_LONGITUDE]):.5f}",
             },
             data_schema=vol.Schema({}),
-        )
-
-    async def async_step_manual_location(
-        self,
-        user_input: dict[str, Any] | None = None,
-    ) -> config_entries.ConfigFlowResult:
-        """Advanced manual coordinate entry."""
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            latitude = _as_float(user_input.get(CONF_START_LATITUDE))
-            longitude = _as_float(user_input.get(CONF_START_LONGITUDE))
-            if latitude is None or not MIN_LATITUDE <= latitude <= MAX_LATITUDE:
-                errors[CONF_START_LATITUDE] = "invalid_coordinates"
-            if longitude is None or not MIN_LONGITUDE <= longitude <= MAX_LONGITUDE:
-                errors[CONF_START_LONGITUDE] = "invalid_coordinates"
-            if not errors:
-                self._data[CONF_START_ADDRESS] = str(user_input.get(CONF_START_ADDRESS, "Manual location")).strip()
-                self._data[CONF_START_LATITUDE] = latitude
-                self._data[CONF_START_LONGITUDE] = longitude
-                return await self.async_step_settings()
-        return self.async_show_form(
-            step_id="manual_location",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional(
-                        CONF_START_ADDRESS, default=self._data.get(CONF_START_ADDRESS, "Manual location")
-                    ): TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT)),
-                    vol.Required(CONF_START_LATITUDE): NumberSelector(
-                        NumberSelectorConfig(mode=NumberSelectorMode.BOX)
-                    ),
-                    vol.Required(CONF_START_LONGITUDE): NumberSelector(
-                        NumberSelectorConfig(mode=NumberSelectorMode.BOX)
-                    ),
-                }
-            ),
-            errors=errors,
         )
 
     async def async_step_settings(
@@ -277,6 +241,7 @@ class RideRadarOptionsFlow(config_entries.OptionsFlow):
                         SelectSelectorConfig(
                             options=[
                                 {"value": ACTION_START, "label": "Change start location"},
+                                {"value": ACTION_MANUAL_START, "label": "Advanced: enter start coordinates"},
                                 {"value": ACTION_SETTINGS, "label": "Trip settings"},
                                 {"value": ACTION_DESTINATIONS, "label": "Enable or disable destinations"},
                                 {"value": ACTION_ADD_CUSTOM, "label": "Add custom destination"},
@@ -297,8 +262,6 @@ class RideRadarOptionsFlow(config_entries.OptionsFlow):
         """Change start location."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            if user_input.get(FIELD_MANUAL_MODE):
-                return await self.async_step_manual_location()
             query = str(user_input.get(CONF_START_ADDRESS, "")).strip()
             if len(query) < MIN_GEOCODE_QUERY_LENGTH:
                 errors[CONF_START_ADDRESS] = "query_too_short"
@@ -307,7 +270,8 @@ class RideRadarOptionsFlow(config_entries.OptionsFlow):
                 if results:
                     self._location_results = results
                     if len(results) == 1:
-                        return self._save_options(_start_location_options(results[0]))
+                        self._pending_destination = _start_location_options(results[0])
+                        return await self.async_step_confirm_location()
                     return await self.async_step_choose_location()
         return self.async_show_form(
             step_id="start_location",
@@ -316,7 +280,6 @@ class RideRadarOptionsFlow(config_entries.OptionsFlow):
                     vol.Required(CONF_START_ADDRESS, default=self._config.get(CONF_START_ADDRESS, "")): TextSelector(
                         TextSelectorConfig(type=TextSelectorType.TEXT)
                     ),
-                    vol.Optional(FIELD_MANUAL_MODE, default=False): BooleanSelector(),
                 }
             ),
             errors=errors,
@@ -326,23 +289,44 @@ class RideRadarOptionsFlow(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
         """Choose start location result."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self._save_options(_start_location_options(self._location_results[int(user_input[FIELD_LOCATION])]))
+            result = _selected_location_result(self._location_results, user_input.get(FIELD_LOCATION), errors)
+            if result is not None:
+                self._pending_destination = _start_location_options(result)
+                return await self.async_step_confirm_location()
         return self.async_show_form(
             step_id="choose_location",
             data_schema=vol.Schema(
                 {
                     vol.Required(FIELD_LOCATION): SelectSelector(
                         SelectSelectorConfig(
-                            options=[result.as_option(index) for index, result in enumerate(self._location_results)],
+                            options=_location_options(self._location_results),
                             mode=SelectSelectorMode.DROPDOWN,
                         )
                     )
                 }
             ),
+            errors=errors,
         )
 
-    async def async_step_manual_location(
+    async def async_step_confirm_location(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Confirm the resolved options start location."""
+        if user_input is not None:
+            return self._save_options(self._pending_destination)
+        return self.async_show_form(
+            step_id="confirm_location",
+            description_placeholders={
+                "address": str(self._pending_destination.get(CONF_START_ADDRESS, "")),
+                "latitude": f"{float(self._pending_destination[CONF_START_LATITUDE]):.5f}",
+                "longitude": f"{float(self._pending_destination[CONF_START_LONGITUDE]):.5f}",
+            },
+            data_schema=vol.Schema({}),
+        )
+
+    async def async_step_manual_start_location(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
         """Advanced manual start coordinate edit."""
@@ -363,7 +347,7 @@ class RideRadarOptionsFlow(config_entries.OptionsFlow):
                     }
                 )
         return self.async_show_form(
-            step_id="manual_location",
+            step_id="manual_start_location",
             data_schema=vol.Schema(
                 {
                     vol.Optional(
@@ -472,20 +456,24 @@ class RideRadarOptionsFlow(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
         """Choose custom destination geocoding result."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self._save_custom_destination(self._location_results[int(user_input[FIELD_LOCATION])])
+            result = _selected_location_result(self._location_results, user_input.get(FIELD_LOCATION), errors)
+            if result is not None:
+                return self._save_custom_destination(result)
         return self.async_show_form(
             step_id="choose_custom_location",
             data_schema=vol.Schema(
                 {
                     vol.Required(FIELD_LOCATION): SelectSelector(
                         SelectSelectorConfig(
-                            options=[result.as_option(index) for index, result in enumerate(self._location_results)],
+                            options=_location_options(self._location_results),
                             mode=SelectSelectorMode.DROPDOWN,
                         )
                     )
                 }
             ),
+            errors=errors,
         )
 
     async def async_step_remove_custom_destination(
@@ -718,6 +706,32 @@ def _start_location_options(result: LocationResult) -> dict[str, Any]:
         CONF_START_LATITUDE: result.latitude,
         CONF_START_LONGITUDE: result.longitude,
     }
+
+
+def _location_options(results: list[LocationResult]) -> list[dict[str, str]]:
+    return [
+        {
+            "value": str(index),
+            "label": f"{result.label} ({result.latitude:.5f}, {result.longitude:.5f})",
+        }
+        for index, result in enumerate(results)
+    ]
+
+
+def _selected_location_result(
+    results: list[LocationResult],
+    value: Any,
+    errors: dict[str, str],
+) -> LocationResult | None:
+    try:
+        index = int(value)
+    except (TypeError, ValueError):
+        errors[FIELD_LOCATION] = "invalid_location_choice"
+        return None
+    if index < 0 or index >= len(results):
+        errors[FIELD_LOCATION] = "invalid_location_choice"
+        return None
+    return results[index]
 
 
 def _as_float(value: Any) -> float | None:

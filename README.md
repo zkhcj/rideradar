@@ -112,13 +112,13 @@ Add RideRadar from Settings > Devices & services > Add integration.
 
 The setup flow asks for a start address or place name. Home Assistant config flows do not provide reliable dynamic autocomplete for custom integrations, so RideRadar uses a Home Assistant-native lookup flow instead:
 
-1. Type an address or place name with at least 3 characters.
+1. Type an address, place name, city, village, or landmark with at least 3 characters. Examples: `Brussels`, `Luxembourg City`, `Aachen Hbf`, or `Market Square Maastricht`.
 2. RideRadar geocodes it using the free Open-Meteo geocoding API.
 3. If multiple matches are found, choose the correct one.
 4. Confirm the resolved address, latitude, and longitude.
 5. Continue with ride settings and destination selection.
 
-Manual coordinate entry is available as an advanced path when geocoding cannot find the right location.
+Manual coordinate entry is not part of the primary setup path. It is only available later as an advanced options fallback when location search cannot find the right start point.
 
 You can change these later from the integration options:
 
