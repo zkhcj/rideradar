@@ -258,9 +258,12 @@ def _opportunities(results: list[DestinationResult]) -> list[dict[str, Any]]:
                     "weather_score": experience.weather_score,
                     "stability_score": window.weather_stability_score,
                     "traffic_score": experience.traffic_score,
+                    "traffic_level": _pressure_level(experience.traffic_score),
                     "tourism_pressure_score": experience.tourism_pressure_score,
+                    "tourism_level": _pressure_level(experience.tourism_pressure_score),
                     "holiday_score": experience.holiday_score,
                     "motorcycle_access_score": experience.motorcycle_access_score,
+                    "access_status": _access_status(experience.motorcycle_access_score),
                     "distance_score": experience.distance_score,
                     "temperature_score": experience.temperature_score,
                     "road_fun_score": experience.road_fun_score,
@@ -300,6 +303,26 @@ def _window_verdict(score: int, weekend: bool = False) -> str:
     if score >= 55:
         return f"Marginal{suffix}"
     return f"Poor{suffix}"
+
+
+def _pressure_level(score: int) -> str:
+    if score >= 80:
+        return "Low"
+    if score >= 60:
+        return "Medium"
+    if score >= 40:
+        return "High"
+    return "Severe"
+
+
+def _access_status(score: int) -> str:
+    if score >= 85:
+        return "Open"
+    if score >= 65:
+        return "Partial"
+    if score >= 35:
+        return "Restricted"
+    return "Avoid"
 
 
 def _format_minutes(minutes: int) -> str:

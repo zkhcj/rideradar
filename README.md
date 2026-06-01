@@ -6,6 +6,8 @@ Stop checking ten different websites. Know where to ride before you leave the ga
 
 ![RideRadar dashboard hero](docs/images/rideradar-dashboard-hero.png)
 
+![RideRadar destination roads](docs/images/rideradar-destination-collage.png)
+
 ## Why RideRadar?
 
 Normally riders check Buienradar, Windy, Google Maps, ANWB, Google Traffic, holiday calendars, motorcycle forums, and local closure notices before deciding where to ride.
@@ -74,13 +76,15 @@ content: >
 ### Top 5 Reachable Destinations
 
 ```yaml
-type: entities
-title: RideRadar destinations
-entities:
-  - entity: sensor.rideradar_best_trip_destination
-  - entity: sensor.rideradar_best_ride_quality_score
-  - entity: sensor.rideradar_best_opportunities
-  - entity: sensor.rideradar_destination_count
+type: markdown
+title: RideRadar ranking
+content: >
+  {% set windows = state_attr('sensor.rideradar_best_opportunities', 'opportunities') or [] %}
+  | Destination | Score | Distance | Traffic | Access |
+  | --- | ---: | ---: | --- | --- |
+  {% for item in windows[:5] %}
+  | {{ item.destination }} | {{ item.ride_quality_score }} | {{ item.route_distance_km | round(0) }} km | {{ item.traffic_level }} | {{ item.access_status }} |
+  {% endfor %}
 ```
 
 ### Top 5 Availability Windows
@@ -180,13 +184,25 @@ end_date: "2026-05-15"
 ride_quality_score: 78
 weather_score: 95
 traffic_score: 62
+traffic_level: "Medium"
 tourism_pressure_score: 58
+tourism_level: "High"
 holiday_score: 55
 motorcycle_access_score: 86
+access_status: "Open"
 route_distance_km: 190
 verdict: "Good window"
 explanation: "Excellent weather, but Ascension Day creates long-weekend traffic pressure."
 ```
+
+## Destination Imagery
+
+RideRadar bundles local showcase imagery for the README so the project remains offline-friendly:
+
+- `docs/images/rideradar-dashboard-hero.png`
+- `docs/images/rideradar-destination-collage.png`
+
+The destination collage represents the type of riding environments RideRadar is built for: Mosel vineyards, Sauerland hills, Harz forests, Ardennes valleys, Vosges roads, and Black Forest curves.
 
 ## Configuration Guide
 
