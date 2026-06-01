@@ -1,8 +1,9 @@
 """Tests for RideRadar scoring."""
 
-from custom_components.rideradar.models import DailyForecast
+from custom_components.rideradar.models import DailyForecast, DestinationArea, RouteInfo
 from custom_components.rideradar.scoring import (
     calculate_best_trip_window,
+    calculate_ride_experience,
     calculate_ride_score,
     calculate_trip_windows,
     calculate_weather_stability_score,
@@ -109,3 +110,44 @@ def test_limited_forecast_data_has_no_complete_trip_window() -> None:
 
     assert calculate_trip_windows(forecasts, 2) == []
     assert calculate_best_trip_window(forecasts, 2) is None
+
+
+def test_ride_experience_penalizes_holiday_long_weekend_traffic() -> None:
+    forecasts = [
+        DailyForecast("2026-05-14", 22, 0, 0, 10, 15, 20, 1),
+        DailyForecast("2026-05-15", 22, 0, 0, 10, 15, 20, 1),
+    ]
+    window = calculate_best_trip_window(forecasts, 2)
+
+    assert window is not None
+    experience = calculate_ride_experience(
+        DestinationArea("Sauerland", "Duitsland, Noordrijn-Westfalen", 51.18, 8.25),
+        RouteInfo(190, 150, "test"),
+        window,
+        forecasts,
+    )
+
+    assert experience.ride_quality_score < window.trip_score
+    assert experience.traffic_score < 80
+    assert "Ascension Day" in experience.holiday_names
+    assert "Holiday pressure" in experience.explanation
+
+
+def test_ride_experience_penalizes_weekend_motorcycle_restriction_risk() -> None:
+    forecasts = [
+        DailyForecast("2026-06-06", 22, 0, 0, 10, 15, 20, 1),
+        DailyForecast("2026-06-07", 22, 0, 0, 10, 15, 20, 1),
+    ]
+    window = calculate_best_trip_window(forecasts, 2)
+
+    assert window is not None
+    experience = calculate_ride_experience(
+        DestinationArea("Eifel", "Duitsland / Belgie", 50.45, 6.55),
+        RouteInfo(220, 170, "test"),
+        window,
+        forecasts,
+    )
+
+    assert experience.motorcycle_access_score < 80
+    assert experience.tourism_pressure_score < 80
+    assert experience.access_notes

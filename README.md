@@ -1,6 +1,43 @@
 # RideRadar
 
-RideRadar recommends the best complete motorcycle trip windows from your configured start location and destinations.
+RideRadar automatically analyzes weather, route distance, traffic pressure, holidays, motorcycle access risk, tourism pressure, and riding conditions to recommend the best motorcycle destinations within reach.
+
+Stop checking ten different websites. Know where to ride before you leave the garage.
+
+![RideRadar dashboard hero](docs/images/rideradar-dashboard-hero.png)
+
+## Why RideRadar?
+
+Normally riders check Buienradar, Windy, Google Maps, ANWB, Google Traffic, holiday calendars, motorcycle forums, and local closure notices before deciding where to ride.
+
+RideRadar combines those signals into one Home Assistant recommendation:
+
+- where to ride
+- when to ride
+- why that destination is recommended
+- whether traffic or holidays will hurt the ride
+- whether motorcycle restrictions may affect the route
+- whether the destination is worth the travel distance
+
+## Ride Quality, Not Weather Alone
+
+Motorcyclists do not care about weather in isolation. Perfect weather can still mean a poor ride if roads are full of holiday traffic, caravans, tourists, roadworks, or motorcycle restrictions.
+
+RideRadar exposes a rider-facing `ride_quality_score` built from:
+
+| Signal | Purpose |
+| --- | --- |
+| Weather score | Dry, calm, comfortable riding conditions |
+| Stability score | Consistency across the complete trip |
+| Temperature score | Comfortable temperatures for riding gear |
+| Distance score | Whether the destination is worth the travel distance |
+| Traffic score | Expected congestion pressure |
+| Tourism pressure score | Crowding from holidays, weekends, and peak season |
+| Holiday score | Public holiday and long-weekend impact |
+| Motorcycle access score | Restriction and closure risk |
+| Road fun score | Destination suitability for enjoyable motorcycle roads |
+
+Current traffic, tourism, holiday, access, and road-fun scoring is deterministic and offline-friendly. It uses destination profiles, public-holiday calculations, long-weekend detection, seasonality, and known regional motorcycle restriction risk. Future routing providers can replace these heuristics with live traffic and road closure data.
 
 ## 10-Step Quickstart
 
@@ -25,7 +62,7 @@ title: RideRadar best trip
 content: >
   ## {{ states('sensor.rideradar_best_trip_destination') }}
 
-  Trip score: **{{ states('sensor.rideradar_best_trip_score') }}/100**
+  Ride quality: **{{ states('sensor.rideradar_best_ride_quality_score') }}/100**
 
   Starts: **{{ states('sensor.rideradar_best_trip_start_day') }}**
 
@@ -41,7 +78,7 @@ type: entities
 title: RideRadar destinations
 entities:
   - entity: sensor.rideradar_best_trip_destination
-  - entity: sensor.rideradar_best_trip_score
+  - entity: sensor.rideradar_best_ride_quality_score
   - entity: sensor.rideradar_best_opportunities
   - entity: sensor.rideradar_destination_count
 ```
@@ -55,7 +92,7 @@ content: >
   {% set windows = state_attr('sensor.rideradar_best_opportunities', 'opportunities') or [] %}
   {% for item in windows[:5] %}
   - **{{ item.destination }}** from {{ item.start_date }} to {{ item.end_date }}:
-    {{ item.trip_score }}/100, {{ item.verdict }}
+    {{ item.ride_quality_score }}/100, {{ item.verdict }}
   {% endfor %}
 ```
 
@@ -69,7 +106,7 @@ content: >
   {% if item %}
   **{{ item.destination }}** from {{ item.start_date }} to {{ item.end_date }}
 
-  Score: **{{ item.trip_score }}/100**
+  Ride quality: **{{ item.ride_quality_score }}/100**
 
   {{ item.explanation }}
   {% else %}
@@ -84,7 +121,11 @@ type: markdown
 title: Sauerland detail
 content: >
   {% set e = 'sensor.rideradar_sauerland' %}
-  Trip score: **{{ state_attr(e, 'trip_score') }}/100**
+  Ride quality: **{{ state_attr(e, 'ride_quality_score') }}/100**
+
+  Traffic: **{{ state_attr(e, 'ride_experience').traffic_score }}/100**
+
+  Access: **{{ state_attr(e, 'ride_experience').motorcycle_access_score }}/100**
 
   Stability: **{{ state_attr(e, 'weather_stability_score') }}/100**
 
@@ -107,7 +148,7 @@ Example with a 2-day trip duration and 7-day forecast horizon:
 - Friday-Saturday
 - Saturday-Sunday
 
-Each window includes destination, start date, end date, duration, trip score, stability score, route distance, travel time, daily scores, verdict, and explanation.
+Each window includes destination, start date, end date, duration, ride quality score, weather score, stability score, traffic score, tourism pressure score, holiday score, motorcycle access score, route distance, travel time, daily scores, verdict, and explanation.
 
 Summary sensors:
 
@@ -115,6 +156,7 @@ Summary sensors:
 - `sensor.rideradar_best_weekend_opportunity`
 - `sensor.rideradar_best_weekday_opportunity`
 - `sensor.rideradar_best_next_available_opportunity`
+- `sensor.rideradar_best_ride_quality_score`
 
 Destination sensors expose:
 
@@ -123,9 +165,28 @@ Destination sensors expose:
 - `next_good_window`
 - `weekend_windows`
 - `weekday_windows`
+- `ride_quality_score`
+- `ride_experience`
 - `daily_scores`
 - `trip_score_breakdown`
 - `trip_explanation`
+
+Example opportunity attribute:
+
+```yaml
+destination: Sauerland
+start_date: "2026-05-14"
+end_date: "2026-05-15"
+ride_quality_score: 78
+weather_score: 95
+traffic_score: 62
+tourism_pressure_score: 58
+holiday_score: 55
+motorcycle_access_score: 86
+route_distance_km: 190
+verdict: "Good window"
+explanation: "Excellent weather, but Ascension Day creates long-weekend traffic pressure."
+```
 
 ## Configuration Guide
 

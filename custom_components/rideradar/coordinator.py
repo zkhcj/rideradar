@@ -34,7 +34,7 @@ from .const import (
 from .destinations import destinations_from_config
 from .models import DestinationArea, DestinationResult, RideRadarConfigError
 from .routing import FallbackRoutingClient, RoutingClient
-from .scoring import calculate_ride_score, calculate_trip_windows
+from .scoring import calculate_ride_experience, calculate_ride_score, calculate_trip_windows
 
 LOGGER = logging.getLogger(__name__)
 
@@ -116,8 +116,12 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             raise UpdateFailed(f"Could not update RideRadar data: {err}") from err
 
         best = max(
-            (result for result in results if result.available and result.reachable and result.trip_score is not None),
-            key=lambda item: item.trip_score or 0,
+            (
+                result
+                for result in results
+                if result.available and result.reachable and result.ride_quality_score is not None
+            ),
+            key=lambda item: item.ride_quality_score or 0,
             default=None,
         )
         opportunities = _opportunities(results)
@@ -167,6 +171,8 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 daily_scores={},
                 trip_score_breakdown=None,
                 trip_explanation="Outside configured range.",
+                ride_quality_score=None,
+                ride_experience=None,
                 all_trip_windows=[],
                 reachable=False,
                 available=True,
@@ -183,10 +189,17 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         best_score = scores[best_forecast.date].score if best_forecast else None
         best_day = best_forecast.date if best_forecast else None
         all_trip_windows = calculate_trip_windows(forecasts, trip_duration, activity_profile)
-        best_trip_window = max(all_trip_windows, key=lambda window: window.trip_score, default=None)
+        ride_experiences = [
+            (window, calculate_ride_experience(destination, route, window, forecasts)) for window in all_trip_windows
+        ]
+        best_trip_window, best_ride_experience = max(
+            ride_experiences,
+            key=lambda item: item[1].ride_quality_score,
+            default=(None, None),
+        )
         trip_explanation = (
-            best_trip_window.trip_explanation
-            if best_trip_window
+            f"{best_trip_window.trip_explanation} {best_ride_experience.explanation}"
+            if best_trip_window and best_ride_experience
             else f"No complete {trip_duration}-day trip window is available in the forecast."
         )
         explanation = trip_explanation if best_trip_window else "No forecast available"
@@ -209,6 +222,8 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             daily_scores={date: score.score for date, score in scores.items()},
             trip_score_breakdown=best_trip_window.trip_score_breakdown if best_trip_window else None,
             trip_explanation=trip_explanation,
+            ride_quality_score=best_ride_experience.ride_quality_score if best_ride_experience else None,
+            ride_experience=best_ride_experience,
             all_trip_windows=all_trip_windows,
             reachable=True,
             available=bool(forecasts),
@@ -220,7 +235,7 @@ def _summary(best: DestinationResult | None) -> str:
     if best is None:
         return "No reachable destination with forecast data"
     return (
-        f"{best.destination.name}: {best.trip_score}/100 for a {best.trip_duration}-day trip "
+        f"{best.destination.name}: {best.ride_quality_score}/100 ride quality for a {best.trip_duration}-day trip "
         f"starting {best.best_start_day}. {best.trip_explanation}"
     )
 
@@ -231,6 +246,7 @@ def _opportunities(results: list[DestinationResult]) -> list[dict[str, Any]]:
         if not result.reachable or result.route is None:
             continue
         for window in result.all_trip_windows:
+            experience = calculate_ride_experience(result.destination, result.route, window, result.forecasts)
             opportunities.append(
                 {
                     "destination": result.destination.name,
@@ -238,16 +254,27 @@ def _opportunities(results: list[DestinationResult]) -> list[dict[str, Any]]:
                     "end_date": window.end_day,
                     "duration_days": window.duration_days,
                     "trip_score": window.trip_score,
+                    "ride_quality_score": experience.ride_quality_score,
+                    "weather_score": experience.weather_score,
                     "stability_score": window.weather_stability_score,
+                    "traffic_score": experience.traffic_score,
+                    "tourism_pressure_score": experience.tourism_pressure_score,
+                    "holiday_score": experience.holiday_score,
+                    "motorcycle_access_score": experience.motorcycle_access_score,
+                    "distance_score": experience.distance_score,
+                    "temperature_score": experience.temperature_score,
+                    "road_fun_score": experience.road_fun_score,
+                    "holiday_names": experience.holiday_names,
+                    "access_notes": experience.access_notes,
                     "route_distance_km": result.route.distance_km,
                     "estimated_travel_time": _format_minutes(result.route.travel_time_minutes),
                     "daily_scores": window.daily_scores,
-                    "verdict": _window_verdict(window.trip_score, _is_weekend_window(window)),
-                    "explanation": window.trip_explanation,
+                    "verdict": _window_verdict(experience.ride_quality_score, _is_weekend_window(window)),
+                    "explanation": f"{window.trip_explanation} {experience.explanation}",
                     "window_type": "weekend" if _is_weekend_window(window) else "weekday",
                 }
             )
-    return sorted(opportunities, key=lambda item: (-int(item["trip_score"]), str(item["start_date"])))
+    return sorted(opportunities, key=lambda item: (-int(item["ride_quality_score"]), str(item["start_date"])))
 
 
 def _best_matching_opportunity(opportunities: list[dict[str, Any]], window_type: str) -> dict[str, Any] | None:

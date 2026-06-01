@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, timedelta
 from statistics import mean, pstdev
 
 from .const import DEFAULT_ACTIVITY_PROFILE
-from .models import DailyForecast, RideScore, TripScoreBreakdown, TripWindow
+from .models import DailyForecast, DestinationArea, RideExperience, RideScore, RouteInfo, TripScoreBreakdown, TripWindow
 
 BAD_WEATHER_CODES = {
     51,
@@ -53,6 +54,18 @@ SCORING_PROFILES = {
         wind_penalty_start_kmh=20,
         gust_penalty_start_kmh=35,
     )
+}
+
+DESTINATION_TRAFFIC_PROFILES = {
+    "sauerland": {"popularity": 18, "fun": 86, "access": 86, "countries": {"DE": 1.0, "NL": 0.55, "BE": 0.25}},
+    "vogezen": {"popularity": 22, "fun": 92, "access": 82, "countries": {"FR": 1.0, "DE": 0.45, "NL": 0.35}},
+    "dolomieten": {"popularity": 30, "fun": 96, "access": 76, "countries": {"DE": 0.35, "FR": 0.2}},
+    "harz": {"popularity": 20, "fun": 88, "access": 82, "countries": {"DE": 1.0, "NL": 0.35}},
+    "moezel": {"popularity": 24, "fun": 84, "access": 84, "countries": {"DE": 0.8, "LU": 0.65, "FR": 0.35, "NL": 0.35}},
+    "eifel": {"popularity": 26, "fun": 91, "access": 76, "countries": {"DE": 0.8, "BE": 0.65, "NL": 0.45}},
+    "klein zwitserland": {"popularity": 18, "fun": 88, "access": 88, "countries": {"LU": 1.0, "DE": 0.45, "BE": 0.35}},
+    "zwarte woud": {"popularity": 28, "fun": 94, "access": 72, "countries": {"DE": 1.0, "FR": 0.45, "NL": 0.25}},
+    "teutoburgerwoud": {"popularity": 14, "fun": 78, "access": 90, "countries": {"DE": 1.0, "NL": 0.4}},
 }
 
 
@@ -209,6 +222,67 @@ def calculate_best_trip_window(
     )
 
 
+def calculate_ride_experience(
+    destination: DestinationArea,
+    route: RouteInfo,
+    window: TripWindow,
+    forecasts: list[DailyForecast],
+) -> RideExperience:
+    """Calculate rider-facing quality for one complete trip window."""
+    dates = _window_dates(window)
+    profile = _destination_profile(destination)
+    holiday_names = _holiday_names(dates)
+    holiday_pressure = _holiday_pressure(destination, dates, holiday_names)
+    long_weekend_pressure = _long_weekend_pressure(dates)
+    weekend_pressure = 14 if _contains_weekend(dates) else 0
+    seasonal_pressure = _seasonal_pressure(dates)
+    popularity = int(profile["popularity"])
+
+    traffic_penalty = min(85, holiday_pressure + long_weekend_pressure + weekend_pressure + (popularity * 0.35))
+    traffic_score = _clamp_score(100 - traffic_penalty)
+    tourism_penalty = min(85, holiday_pressure * 0.75 + seasonal_pressure + weekend_pressure + popularity)
+    tourism_pressure_score = _clamp_score(100 - tourism_penalty)
+    holiday_score = _clamp_score(100 - holiday_pressure - long_weekend_pressure)
+    motorcycle_access_score, access_notes = _motorcycle_access(destination, dates, int(profile["access"]))
+    distance_score = _distance_score(route.distance_km)
+    temperature_score = _temperature_score([forecast for forecast in forecasts if forecast.date in window.daily_scores])
+    road_fun_score = int(profile["fun"])
+
+    ride_quality_score = _clamp_score(
+        (window.trip_score * 0.35)
+        + (window.weather_stability_score * 0.20)
+        + (temperature_score * 0.10)
+        + (distance_score * 0.10)
+        + (traffic_score * 0.10)
+        + (tourism_pressure_score * 0.05)
+        + (holiday_score * 0.05)
+        + (motorcycle_access_score * 0.05)
+    )
+
+    explanation = _experience_explanation(
+        ride_quality_score,
+        traffic_score,
+        tourism_pressure_score,
+        motorcycle_access_score,
+        holiday_names,
+        access_notes,
+    )
+    return RideExperience(
+        ride_quality_score=ride_quality_score,
+        weather_score=window.trip_score,
+        traffic_score=traffic_score,
+        tourism_pressure_score=tourism_pressure_score,
+        holiday_score=holiday_score,
+        motorcycle_access_score=motorcycle_access_score,
+        distance_score=distance_score,
+        temperature_score=temperature_score,
+        road_fun_score=road_fun_score,
+        holiday_names=holiday_names,
+        access_notes=access_notes,
+        explanation=explanation,
+    )
+
+
 def _bad_weather_penalty(scores: list[int], forecasts: list[DailyForecast]) -> float:
     """Apply non-linear trip penalties so one bad day hurts the full trip."""
     penalty = 0.0
@@ -236,6 +310,181 @@ def _bad_weather_penalty(scores: list[int], forecasts: list[DailyForecast]) -> f
         if forecast.weather_code in {95, 96, 99}:
             penalty += 18
     return min(75.0, penalty)
+
+
+def _destination_profile(destination: DestinationArea) -> dict[str, object]:
+    name = destination.name.casefold()
+    for key, profile in DESTINATION_TRAFFIC_PROFILES.items():
+        if key in name:
+            return profile
+    return {"popularity": 16, "fun": 78, "access": 88, "countries": {"DE": 0.35, "NL": 0.35, "BE": 0.35}}
+
+
+def _window_dates(window: TripWindow) -> list[date]:
+    try:
+        start = date.fromisoformat(window.start_day)
+        end = date.fromisoformat(window.end_day)
+    except ValueError:
+        return []
+    return [start + timedelta(days=offset) for offset in range((end - start).days + 1)]
+
+
+def _holiday_names(dates: list[date]) -> list[str]:
+    names: list[str] = []
+    for day in dates:
+        names.extend(_holidays_for_day(day))
+    return sorted(set(names))
+
+
+def _holidays_for_day(day: date) -> list[str]:
+    easter = _easter_sunday(day.year)
+    holidays = {
+        (1, 1): "New Year's Day",
+        (5, 1): "Labour Day",
+        (7, 14): "Bastille Day",
+        (10, 3): "German Unity Day",
+        (7, 21): "Belgian National Day",
+        (6, 23): "Luxembourg National Day",
+        (12, 25): "Christmas Day",
+        (12, 26): "Boxing Day",
+    }
+    found = [name for (month, dom), name in holidays.items() if day.month == month and day.day == dom]
+    relative = {
+        easter: "Easter",
+        easter + timedelta(days=1): "Easter Monday",
+        easter + timedelta(days=39): "Ascension Day",
+        easter + timedelta(days=49): "Pentecost",
+        easter + timedelta(days=50): "Whit Monday",
+        easter + timedelta(days=60): "Corpus Christi",
+    }
+    if day in relative:
+        found.append(relative[day])
+    return found
+
+
+def _holiday_pressure(destination: DestinationArea, dates: list[date], holiday_names: list[str]) -> float:
+    if not holiday_names:
+        return 0
+    countries = _destination_profile(destination)["countries"]
+    if not isinstance(countries, dict):
+        return 18
+    return min(45.0, sum(float(weight) for weight in countries.values()) * 12 * len(set(holiday_names)))
+
+
+def _long_weekend_pressure(dates: list[date]) -> int:
+    if not dates:
+        return 0
+    for day in dates:
+        if _holidays_for_day(day) and day.weekday() in {0, 3, 4}:
+            return 20
+    if any(_holidays_for_day(day - timedelta(days=1)) for day in dates if day.weekday() == 4):
+        return 16
+    return 0
+
+
+def _seasonal_pressure(dates: list[date]) -> int:
+    if any(day.month in {7, 8} for day in dates):
+        return 22
+    if any(day.month in {5, 6, 9} for day in dates):
+        return 8
+    return 0
+
+
+def _contains_weekend(dates: list[date]) -> bool:
+    return any(day.weekday() >= 5 for day in dates)
+
+
+def _motorcycle_access(destination: DestinationArea, dates: list[date], base_score: int) -> tuple[int, list[str]]:
+    name = destination.name.casefold()
+    notes: list[str] = []
+    penalty = 0
+    if _contains_weekend(dates) and any(area in name for area in ("eifel", "zwarte woud", "vogezen", "harz")):
+        penalty += 12
+        notes.append("weekend motorcycle restrictions are possible on popular noise-sensitive routes")
+    if any(day.month in {6, 7, 8, 9} for day in dates) and any(area in name for area in ("dolomieten", "vogezen")):
+        penalty += 10
+        notes.append("seasonal mountain or tourism restrictions may affect some roads")
+    score = _clamp_score(base_score - penalty)
+    if not notes:
+        notes.append("no major motorcycle restrictions are known for this destination profile")
+    return score, notes
+
+
+def _distance_score(distance_km: float) -> int:
+    if distance_km <= 120:
+        return 95
+    if distance_km <= 250:
+        return 88
+    if distance_km <= 400:
+        return 72
+    if distance_km <= 600:
+        return 55
+    return 35
+
+
+def _temperature_score(forecasts: list[DailyForecast]) -> int:
+    temperatures = [forecast.temperature_c for forecast in forecasts if forecast.temperature_c is not None]
+    if not temperatures:
+        return 75
+    penalties = []
+    for temperature in temperatures:
+        if 16 <= temperature <= 26:
+            penalties.append(0)
+        elif 10 <= temperature < 16:
+            penalties.append((16 - temperature) * 4)
+        elif 26 < temperature <= 32:
+            penalties.append((temperature - 26) * 3)
+        else:
+            penalties.append(35)
+    return _clamp_score(100 - mean(penalties))
+
+
+def _experience_explanation(
+    ride_quality_score: int,
+    traffic_score: int,
+    tourism_score: int,
+    access_score: int,
+    holiday_names: list[str],
+    access_notes: list[str],
+) -> str:
+    parts = [f"Ride quality is {ride_quality_score}/100."]
+    if traffic_score >= 80:
+        parts.append("Traffic pressure is expected to stay low.")
+    elif traffic_score >= 60:
+        parts.append("Traffic pressure is moderate and may affect busier roads.")
+    else:
+        parts.append("Traffic pressure is high enough to reduce ride quality.")
+    if holiday_names:
+        parts.append(f"Holiday pressure is elevated around {', '.join(holiday_names)}.")
+    if tourism_score < 65:
+        parts.append("Tourism pressure may make scenic routes busier than usual.")
+    if access_score < 80:
+        parts.append("Motorcycle access is partially constrained by known regional restriction risk.")
+    else:
+        parts.append(access_notes[0])
+    return " ".join(parts)
+
+
+def _easter_sunday(year: int) -> date:
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    month_offset = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * month_offset) // 451
+    month = (h + month_offset - 7 * m + 114) // 31
+    day = ((h + month_offset - 7 * m + 114) % 31) + 1
+    return date(year, month, day)
+
+
+def _clamp_score(value: float) -> int:
+    return max(0, min(100, round(value)))
 
 
 def _trip_explanation(

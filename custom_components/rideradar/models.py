@@ -113,6 +113,24 @@ class TripWindow:
 
 
 @dataclass(frozen=True, slots=True)
+class RideExperience:
+    """Non-weather riding quality signals for one trip window."""
+
+    ride_quality_score: int
+    weather_score: int
+    traffic_score: int
+    tourism_pressure_score: int
+    holiday_score: int
+    motorcycle_access_score: int
+    distance_score: int
+    temperature_score: int
+    road_fun_score: int
+    holiday_names: list[str]
+    access_notes: list[str]
+    explanation: str
+
+
+@dataclass(frozen=True, slots=True)
 class DestinationResult:
     """Fully evaluated destination result."""
 
@@ -132,6 +150,8 @@ class DestinationResult:
     daily_scores: dict[str, int]
     trip_score_breakdown: TripScoreBreakdown | None
     trip_explanation: str
+    ride_quality_score: int | None
+    ride_experience: RideExperience | None
     all_trip_windows: list[TripWindow]
     reachable: bool
     available: bool

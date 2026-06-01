@@ -18,6 +18,7 @@ from homeassistant.util import slugify
 from .const import ATTRIBUTION, DOMAIN, MANUFACTURER
 from .coordinator import RideRadarDataCoordinator
 from .models import DestinationResult
+from .scoring import calculate_ride_experience
 
 
 async def async_setup_entry(
@@ -54,7 +55,19 @@ async def async_setup_entry(
                 native_unit_of_measurement=PERCENTAGE,
                 state_class=SensorStateClass.MEASUREMENT,
             ),
-            lambda data: _best_attr(data, "trip_score"),
+            lambda data: _best_attr(data, "ride_quality_score"),
+        ),
+        RideRadarSensor(
+            entry,
+            coordinator,
+            SensorEntityDescription(
+                key="best_ride_quality_score",
+                name="Best Ride Quality Score",
+                icon="mdi:road-variant",
+                native_unit_of_measurement=PERCENTAGE,
+                state_class=SensorStateClass.MEASUREMENT,
+            ),
+            lambda data: _best_attr(data, "ride_quality_score"),
         ),
         RideRadarSensor(
             entry,
@@ -83,7 +96,7 @@ async def async_setup_entry(
                 native_unit_of_measurement=PERCENTAGE,
                 state_class=SensorStateClass.MEASUREMENT,
             ),
-            lambda data: _best_attr(data, "trip_score"),
+            lambda data: _best_attr(data, "ride_quality_score"),
         ),
         RideRadarSensor(
             entry,
@@ -238,6 +251,8 @@ class RideRadarDestinationSensor(CoordinatorEntity[RideRadarDataCoordinator], Se
         route = result.route
         return {
             "trip_score": result.trip_score,
+            "ride_quality_score": result.ride_quality_score,
+            "ride_experience": _experience_attributes(result),
             "best_trip_window": _trip_window_attributes(result),
             "all_trip_windows": _trip_windows_attributes(result),
             "next_good_window": _next_good_window(result),
@@ -295,6 +310,8 @@ def _best_attr(data: dict[str, object], key: str) -> Any:
         return best.destination.name
     if key == "trip_score":
         return best.trip_score
+    if key == "ride_quality_score":
+        return best.ride_quality_score
     if key == "score":
         return best.best_score
     if key == "trip_start_day":
@@ -337,6 +354,9 @@ def _next_good_window(result: DestinationResult) -> dict[str, Any] | None:
 def _window_attributes(result: DestinationResult, window: Any) -> dict[str, Any]:
     route = result.route
     weekend = _is_weekend(window.start_day, window.end_day)
+    experience = None
+    if route is not None:
+        experience = calculate_ride_experience(result.destination, route, window, result.forecasts)
     return {
         "destination": result.destination.name,
         "start_date": window.start_day,
@@ -345,15 +365,46 @@ def _window_attributes(result: DestinationResult, window: Any) -> dict[str, Any]
         "end_day": window.end_day,
         "duration_days": window.duration_days,
         "trip_score": window.trip_score,
+        "ride_quality_score": experience.ride_quality_score if experience else window.trip_score,
+        "weather_score": experience.weather_score if experience else window.trip_score,
         "stability_score": window.weather_stability_score,
+        "traffic_score": experience.traffic_score if experience else None,
+        "tourism_pressure_score": experience.tourism_pressure_score if experience else None,
+        "holiday_score": experience.holiday_score if experience else None,
+        "motorcycle_access_score": experience.motorcycle_access_score if experience else None,
+        "distance_score": experience.distance_score if experience else None,
+        "temperature_score": experience.temperature_score if experience else None,
+        "road_fun_score": experience.road_fun_score if experience else None,
+        "holiday_names": experience.holiday_names if experience else [],
+        "access_notes": experience.access_notes if experience else [],
         "daily_scores": window.daily_scores,
         "route_distance_km": route.distance_km if route else None,
         "estimated_travel_time": _format_minutes(route.travel_time_minutes) if route else None,
-        "verdict": _verdict(window.trip_score, weekend),
-        "explanation": window.trip_explanation,
+        "verdict": _verdict(experience.ride_quality_score if experience else window.trip_score, weekend),
+        "explanation": f"{window.trip_explanation} {experience.explanation}" if experience else window.trip_explanation,
         "window_type": "weekend" if weekend else "weekday",
         "weather_stability_score": window.weather_stability_score,
         "stability_explanation": window.stability_explanation,
+    }
+
+
+def _experience_attributes(result: DestinationResult) -> dict[str, Any] | None:
+    experience = result.ride_experience
+    if experience is None:
+        return None
+    return {
+        "ride_quality_score": experience.ride_quality_score,
+        "weather_score": experience.weather_score,
+        "traffic_score": experience.traffic_score,
+        "tourism_pressure_score": experience.tourism_pressure_score,
+        "holiday_score": experience.holiday_score,
+        "motorcycle_access_score": experience.motorcycle_access_score,
+        "distance_score": experience.distance_score,
+        "temperature_score": experience.temperature_score,
+        "road_fun_score": experience.road_fun_score,
+        "holiday_names": experience.holiday_names,
+        "access_notes": experience.access_notes,
+        "explanation": experience.explanation,
     }
 
 
@@ -379,7 +430,7 @@ def _opportunity_summary(value: object) -> str | None:
 def _single_opportunity_summary(value: object) -> str | None:
     if not isinstance(value, dict):
         return None
-    return f"{value.get('destination')} from {value.get('start_date')}: {value.get('trip_score')}/100"
+    return f"{value.get('destination')} from {value.get('start_date')}: {value.get('ride_quality_score')}/100"
 
 
 def _is_weekend(start_value: str, end_value: str) -> bool:
