@@ -12,8 +12,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .api import OpenMeteoClient, RideRadarApiError
 from .const import (
     CONF_ACTIVITY_PROFILE,
-    CONF_DETOUR_FACTOR,
     CONF_DESTINATIONS,
+    CONF_DETOUR_FACTOR,
     CONF_FORECAST_DAYS,
     CONF_MAX_ROUTE_DISTANCE_KM,
     CONF_START_LATITUDE,

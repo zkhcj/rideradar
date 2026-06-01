@@ -117,10 +117,10 @@ def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                 default=defaults.get(CONF_START_ADDRESS, ""),
             ): TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT)),
             _optional_number_key(CONF_START_LATITUDE, defaults): NumberSelector(
-                NumberSelectorConfig(mode=NumberSelectorMode.BOX, step=0.000001)
+                NumberSelectorConfig(mode=NumberSelectorMode.BOX)
             ),
             _optional_number_key(CONF_START_LONGITUDE, defaults): NumberSelector(
-                NumberSelectorConfig(mode=NumberSelectorMode.BOX, step=0.000001)
+                NumberSelectorConfig(mode=NumberSelectorMode.BOX)
             ),
             vol.Required(
                 CONF_MAX_ROUTE_DISTANCE_KM,

@@ -29,6 +29,7 @@ async def test_setup_and_unload_entry(hass, monkeypatch) -> None:
         return True
 
     monkeypatch.setattr(RideRadarDataCoordinator, "async_config_entry_first_refresh", fake_first_refresh)
+    monkeypatch.setattr("custom_components.rideradar.async_get_clientsession", lambda hass: object())
     monkeypatch.setattr(hass.config_entries, "async_forward_entry_setups", fake_forward_setups)
     monkeypatch.setattr(hass.config_entries, "async_unload_platforms", fake_unload_platforms)
 

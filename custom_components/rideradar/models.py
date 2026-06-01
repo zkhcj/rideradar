@@ -23,7 +23,7 @@ class DestinationArea:
     preferred_route_target_address: str | None = None
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "DestinationArea":
+    def from_dict(cls, value: dict[str, Any]) -> DestinationArea:
         """Create a destination area from user-editable config data."""
         if not isinstance(value, dict):
             raise RideRadarConfigError("Destination must be an object")

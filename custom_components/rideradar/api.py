@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from asyncio import TimeoutError as AsyncTimeoutError
 from typing import Any
 
 from aiohttp import ClientError, ClientResponseError, ClientSession, ContentTypeError
@@ -84,9 +83,11 @@ class OpenMeteoClient:
             async with self._session.get(url, params=params, timeout=30) as response:
                 response.raise_for_status()
                 payload = await response.json()
+        except ContentTypeError as err:
+            raise RideRadarApiError(f"Could not {action}: Open-Meteo returned invalid JSON") from err
         except ClientResponseError as err:
             raise RideRadarApiError(f"Could not {action}: Open-Meteo returned HTTP {err.status}") from err
-        except (ClientError, AsyncTimeoutError, ContentTypeError) as err:
+        except (TimeoutError, ClientError) as err:
             raise RideRadarApiError(f"Could not {action}: {err}") from err
         if not isinstance(payload, dict):
             raise RideRadarApiError(f"Could not {action}: Open-Meteo returned invalid JSON")

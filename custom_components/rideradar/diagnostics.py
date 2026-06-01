@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import diagnostics as diag
 
 from .const import CONF_START_ADDRESS, DOMAIN
 
@@ -22,8 +22,8 @@ async def async_get_config_entry_diagnostics(
     data = getattr(coordinator, "data", None) or {}
     return {
         "entry": {
-            "data": diag.async_redact_data(entry.data, TO_REDACT),
-            "options": diag.async_redact_data(entry.options, TO_REDACT),
+            "data": async_redact_data(entry.data, TO_REDACT),
+            "options": async_redact_data(entry.options, TO_REDACT),
         },
         "coordinator": {
             "last_update_success": getattr(coordinator, "last_update_success", None),
