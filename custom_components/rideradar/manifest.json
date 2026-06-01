@@ -1,0 +1,14 @@
+{
+  "domain": "rideradar",
+  "name": "RideRadar",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/custom-components/rideradar",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/custom-components/rideradar/issues",
+  "loggers": ["custom_components.rideradar"],
+  "requirements": [],
+  "version": "0.1.0"
+}

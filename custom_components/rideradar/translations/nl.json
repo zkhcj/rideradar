@@ -1,0 +1,65 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "RideRadar",
+        "description": "Configureer startlocatie, bereik, voorspelling, routefallback en bewerkbare bestemmingsgebieden.",
+        "data": {
+          "start_address": "Startadres",
+          "start_latitude": "Startbreedtegraad",
+          "start_longitude": "Startlengtegraad",
+          "max_route_distance_km": "Maximale routeafstand",
+          "forecast_days": "Voorspellingsdagen",
+          "activity_profile": "Activiteitsprofiel",
+          "detour_factor": "Omwegfactor voor fallback-route",
+          "destinations": "Bestemmingsgebieden JSON"
+        }
+      }
+    },
+    "error": {
+      "address_or_coordinates_required": "Voer een startadres of beide coordinaten in.",
+      "address_not_found": "Het startadres kon niet worden gevonden.",
+      "coordinates_required": "Voer zowel breedtegraad als lengtegraad in.",
+      "geocoding_failed": "Geocoding is mislukt. Probeer later opnieuw of voer coordinaten in.",
+      "invalid_activity_profile": "Selecteer een ondersteund activiteitsprofiel.",
+      "invalid_coordinates": "Coordinaten zijn ongeldig of buiten het ondersteunde bereik.",
+      "invalid_destinations": "Bestemmingsgebieden moeten geldige JSON zijn met de vereiste velden.",
+      "invalid_detour_factor": "De omwegfactor moet binnen het ondersteunde bereik liggen.",
+      "invalid_forecast_days": "Voorspellingsdagen moet binnen het ondersteunde bereik liggen.",
+      "invalid_range": "Maximale routeafstand moet binnen het ondersteunde bereik liggen."
+    },
+    "abort": {
+      "already_configured": "RideRadar is al geconfigureerd."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "RideRadar opties",
+        "description": "Wijzig startlocatie, bereik, voorspelling, routefallback of bestemmingsgebieden.",
+        "data": {
+          "start_address": "Startadres",
+          "start_latitude": "Startbreedtegraad",
+          "start_longitude": "Startlengtegraad",
+          "max_route_distance_km": "Maximale routeafstand",
+          "forecast_days": "Voorspellingsdagen",
+          "activity_profile": "Activiteitsprofiel",
+          "detour_factor": "Omwegfactor voor fallback-route",
+          "destinations": "Bestemmingsgebieden JSON"
+        }
+      }
+    },
+    "error": {
+      "address_or_coordinates_required": "Voer een startadres of beide coordinaten in.",
+      "address_not_found": "Het startadres kon niet worden gevonden.",
+      "coordinates_required": "Voer zowel breedtegraad als lengtegraad in.",
+      "geocoding_failed": "Geocoding is mislukt. Probeer later opnieuw of voer coordinaten in.",
+      "invalid_activity_profile": "Selecteer een ondersteund activiteitsprofiel.",
+      "invalid_coordinates": "Coordinaten zijn ongeldig of buiten het ondersteunde bereik.",
+      "invalid_destinations": "Bestemmingsgebieden moeten geldige JSON zijn met de vereiste velden.",
+      "invalid_detour_factor": "De omwegfactor moet binnen het ondersteunde bereik liggen.",
+      "invalid_forecast_days": "Voorspellingsdagen moet binnen het ondersteunde bereik liggen.",
+      "invalid_range": "Maximale routeafstand moet binnen het ondersteunde bereik liggen."
+    }
+  }
+}

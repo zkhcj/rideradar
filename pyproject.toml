@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rideradar"
+version = "0.1.0"
+description = "Home Assistant custom integration for outdoor trip weather destination recommendations."
+requires-python = ">=3.12"
+dependencies = [
+  "homeassistant>=2024.12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+  "pytest-homeassistant-custom-component>=0.13.0",
+  "ruff>=0.6.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["custom_components*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ANN"]
+ignore = ["ANN401"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ANN"]

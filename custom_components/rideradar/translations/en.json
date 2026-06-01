@@ -1,0 +1,65 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "RideRadar",
+        "description": "Configure start location, range, forecast window, route fallback, and editable destination areas.",
+        "data": {
+          "start_address": "Start address",
+          "start_latitude": "Start latitude",
+          "start_longitude": "Start longitude",
+          "max_route_distance_km": "Maximum route distance",
+          "forecast_days": "Forecast days",
+          "activity_profile": "Activity profile",
+          "detour_factor": "Fallback route detour factor",
+          "destinations": "Destination areas JSON"
+        }
+      }
+    },
+    "error": {
+      "address_or_coordinates_required": "Enter a start address or both coordinates.",
+      "address_not_found": "The start address could not be resolved.",
+      "coordinates_required": "Enter both latitude and longitude.",
+      "geocoding_failed": "Geocoding failed. Try again later or enter coordinates.",
+      "invalid_activity_profile": "Select a supported activity profile.",
+      "invalid_coordinates": "Coordinates are invalid or outside the supported range.",
+      "invalid_destinations": "Destination areas must be valid JSON with the required fields.",
+      "invalid_detour_factor": "Detour factor must be within the supported range.",
+      "invalid_forecast_days": "Forecast days must be within the supported range.",
+      "invalid_range": "Maximum route distance must be within the supported range."
+    },
+    "abort": {
+      "already_configured": "RideRadar is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "RideRadar options",
+        "description": "Change start location, range, forecast window, route fallback, or destination areas.",
+        "data": {
+          "start_address": "Start address",
+          "start_latitude": "Start latitude",
+          "start_longitude": "Start longitude",
+          "max_route_distance_km": "Maximum route distance",
+          "forecast_days": "Forecast days",
+          "activity_profile": "Activity profile",
+          "detour_factor": "Fallback route detour factor",
+          "destinations": "Destination areas JSON"
+        }
+      }
+    },
+    "error": {
+      "address_or_coordinates_required": "Enter a start address or both coordinates.",
+      "address_not_found": "The start address could not be resolved.",
+      "coordinates_required": "Enter both latitude and longitude.",
+      "geocoding_failed": "Geocoding failed. Try again later or enter coordinates.",
+      "invalid_activity_profile": "Select a supported activity profile.",
+      "invalid_coordinates": "Coordinates are invalid or outside the supported range.",
+      "invalid_destinations": "Destination areas must be valid JSON with the required fields.",
+      "invalid_detour_factor": "Detour factor must be within the supported range.",
+      "invalid_forecast_days": "Forecast days must be within the supported range.",
+      "invalid_range": "Maximum route distance must be within the supported range."
+    }
+  }
+}
