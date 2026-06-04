@@ -113,6 +113,7 @@ def _best_future_windows(data: dict[str, Any]) -> list[dict[str, Any]]:
                     "end_date": window.end_day,
                     "duration_days": window.duration_days,
                     "ride_quality_score": experience.ride_quality_score,
+                    "weather": getattr(result, "weather", None) or {},
                     "score_breakdown": {
                         "weather_score": experience.weather_score,
                         "stability_score": window.weather_stability_score,

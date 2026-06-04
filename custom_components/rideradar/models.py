@@ -196,6 +196,7 @@ class DestinationResult:
     available: bool
     explanation: str
     exclusion_reasons: list[str]
+    weather: dict[str, Any] | None = None
 
 
 def _required_text(value: dict[str, Any], key: str) -> str:

@@ -61,3 +61,6 @@ def test_default_dashboard_uses_native_entities_and_literal_markdown_tables() ->
     assert "type: custom:flex-table-card" in readme
     assert "opportunities.score" in readme
     assert "opportunities.strategy_label" in readme
+    assert "does not ship a shared maintainer-owned API key" in readme
+    assert "does not route traffic through a central RideRadar weather backend" in readme
+    assert "never silently applies one generic home weather entity" in readme

@@ -28,6 +28,7 @@ CONF_DESTINATIONS: Final = "destinations"
 CONF_ENABLED_DEFAULT_DESTINATIONS: Final = "enabled_default_destinations"
 CONF_CUSTOM_DESTINATIONS: Final = "custom_destinations"
 CONF_DETOUR_FACTOR: Final = "detour_factor"
+CONF_WEATHER_ENTITY_MAP: Final = "weather_entity_map"
 
 DEFAULT_FORECAST_DAYS: Final = 8
 DEFAULT_PREFERRED_TRIP_DURATION: Final = "2"

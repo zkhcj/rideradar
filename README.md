@@ -136,17 +136,20 @@ sections:
         content: |
           {% set status = states('sensor.rideradar_weather_status') %}
           {% set provider = state_attr('sensor.rideradar_weather_status', 'provider_used') or state_attr('sensor.rideradar_weather_status', 'primary_provider') or 'onbekend' %}
+          {% set location = state_attr('sensor.rideradar_weather_status', 'forecast_location_name') or 'de bestemming' %}
           {% set fallback = state_attr('sensor.rideradar_weather_status', 'fallback_provider_used') %}
           {% set age = state_attr('sensor.rideradar_weather_status', 'forecast_cache_age_hours') %}
           {% set updated = state_attr('sensor.rideradar_weather_status', 'last_successful_update') %}
           {% set next = state_attr('sensor.rideradar_weather_status', 'next_scheduled_refresh') %}
           {% set calls = state_attr('sensor.rideradar_weather_status', 'calls_used_today') or {} %}
           {% if status == 'ok' %}
-          Weerdata beschikbaar via **{{ provider }}**.
+          Weerdata voor **{{ location }}** beschikbaar via **{{ provider }}**.
+          {% elif status == 'partial' %}
+          Weerdata voor **{{ location }}** is gedeeltelijk beschikbaar via **{{ provider }}**. Het advies is beperkt.
           {% elif status == 'stale' %}
-          RideRadar gebruikt de laatst bekende weersverwachting. Het advies is beperkt.
+          RideRadar gebruikt de laatst bekende weersverwachting voor **{{ location }}**. Het advies is beperkt.
           {% else %}
-          Geen bruikbare weerdata beschikbaar. RideRadar toont alleen kandidaten zonder definitief weeradvies.
+          Geen bruikbare weerdata beschikbaar voor **{{ location }}**. RideRadar toont alleen kandidaten zonder definitief weeradvies.
           {% endif %}
 
           {% if fallback %}
@@ -620,7 +623,29 @@ Summary sensors:
 
 RideRadar dashboard cards never call weather providers directly. Lovelace only renders the latest calculated coordinator state.
 
-Weather forecasts are fetched by the background coordinator and cached per normalized location and forecast horizon. The default refresh interval is 4 hours. A forecast that is 0-4 hours old is treated as fresh. A forecast that is 4-24 hours old is treated as stale: scoring can still use it, but the dashboard shows that the advice is limited. Forecast data older than 24 hours is considered unavailable and is not converted into a fake bad-weather score.
+Weather forecasts are fetched for the destination or ride area coordinates, not for the Home Assistant home location. If RideRadar evaluates Sauerland, it requests Sauerland weather. If it evaluates Harz, it requests Harz weather. One destination forecast is reused across direct, binnendoor/scenic, aanhanger, week, month, advice, rejected-candidate and all-options calculations, but it is never reused for a different destination.
+
+The default coordinate provider is Open-Meteo. Open-Meteo does not require a user API key for the default non-commercial setup. RideRadar does not ship a shared maintainer-owned API key and does not route traffic through a central RideRadar weather backend or proxy.
+
+OpenWeather support, if added later, must use the user's own API key or the user's own Home Assistant OpenWeather integration. RideRadar must never document or embed a maintainer-owned OpenWeather key.
+
+Home Assistant weather entities are only safe when they preserve destination correctness:
+
+- use an explicit destination-to-weather-entity mapping, for example `Sauerland -> weather.sauerland`
+- use a local/home weather entity only for local rides around home
+- do not use `weather.forecast_home` for Sauerland, Harz or another remote destination unless you explicitly mapped that entity to that destination
+
+Advanced destination weather mapping can be supplied through the `weather_entity_map` option data:
+
+```yaml
+weather_entity_map:
+  Sauerland: weather.sauerland
+  Harz: weather.harz
+```
+
+If no explicit mapping exists, RideRadar falls back to the coordinate-based provider and never silently applies one generic home weather entity to every destination.
+
+Weather forecasts are cached per provider, rounded destination latitude, rounded destination longitude, forecast horizon and forecast granularity. The default refresh interval is 4 hours. A forecast that is 0-4 hours old is treated as fresh. A forecast that is 4-24 hours old is treated as stale: scoring can still use it, but the dashboard shows that the advice is limited. Forecast data older than 24 hours is considered unavailable and is not converted into a fake bad-weather score.
 
 Important defaults:
 
@@ -635,7 +660,7 @@ Important defaults:
 
 One destination forecast is reused for direct, binnendoor/scenic, aanhanger, week, month, advice, rejected-candidate and all-options calculations. Changing dashboard controls recalculates RideRadar from cached forecasts unless the weather cache is stale enough for a scheduled refresh.
 
-Provider state is exposed through `sensor.rideradar_weather_status`. It shows the primary provider, provider used, fallback provider when one is used, last successful update, cache age, calls used today, provider states and next scheduled refresh.
+Provider state is exposed through `sensor.rideradar_weather_status`. It shows the primary provider, provider used, forecast location, forecast coordinates, fallback provider when one is used, last successful update, cache age, calls used today, provider states and next scheduled refresh.
 
 Manual refresh is available through:
 
@@ -647,7 +672,9 @@ data:
 
 With `force: false`, RideRadar still respects cache freshness and provider budgets. Use `force: true` only for manual testing because it bypasses normal cache and budget protection.
 
-RideRadar v1 ships with the Open-Meteo provider client. The coordinator cache layer supports multiple provider clients internally so fallback providers can be added without changing dashboard behavior. If a provider is rate-limited or unavailable, RideRadar uses a configured fallback provider when present, otherwise it keeps using the best available cached forecast within the stale fallback window.
+RideRadar v1 ships with the Open-Meteo coordinate provider client. The coordinator cache layer supports multiple provider clients internally so fallback providers can be added without changing dashboard behavior. If a provider is rate-limited or unavailable, RideRadar uses a configured fallback provider when present, otherwise it keeps using the best available cached forecast for the same destination coordinates within the stale fallback window.
+
+Rejected destinations include structured evidence such as destination, reason, details, forecast location, provider used, weather status and cache age. Bad-weather rejection is only valid when real destination weather data exists. Missing weather data is shown as unavailable, not as `weather_score: 0`.
 
 Destination sensors expose:
 

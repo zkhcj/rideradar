@@ -23,6 +23,7 @@ from .const import (
     CONF_START_LATITUDE,
     CONF_START_LONGITUDE,
     CONF_TRAILER_SUPPORT_ENABLED,
+    CONF_WEATHER_ENTITY_MAP,
     CONTROL_AVAILABLE_HOURS_PER_DAY,
     CONTROL_FORECAST_HORIZON_DAYS,
     CONTROL_MAX_APPROACH_TIME_HOURS,
@@ -62,7 +63,7 @@ from .scoring import (
     calculate_variable_trip_windows,
     ride_verdict,
 )
-from .weather_cache import ForecastCache
+from .weather_cache import ForecastCache, HomeAssistantWeatherEntityClient
 
 LOGGER = logging.getLogger(__name__)
 
@@ -157,7 +158,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         )
         self.entry = entry
         self.api_client = api_client
-        self.forecast_cache = ForecastCache(hass, _weather_providers(api_client))
+        self.forecast_cache = ForecastCache(hass, _weather_providers(api_client, hass, self.config))
         self._force_weather_refresh = False
         self.runtime_controls: dict[str, str] = {}
         self.routing_client = routing_client or FallbackRoutingClient(
@@ -283,6 +284,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             destinations = destinations_from_config(config)
             force_weather_refresh = self._force_weather_refresh
             self._force_weather_refresh = False
+            self.forecast_cache.set_providers(_weather_providers(self.api_client, self.hass, config))
         except (KeyError, TypeError, ValueError, RideRadarConfigError) as err:
             raise UpdateFailed(f"Invalid RideRadar configuration: {err}") from err
 
@@ -487,15 +489,31 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 available=True,
                 explanation=f"Deze bestemming ligt buiten de ingestelde maximale afstand ({route.distance_km:.0f} km).",
                 exclusion_reasons=["too_far"],
+                weather=_destination_weather_metadata(
+                    destination,
+                    None,
+                    "unavailable",
+                    "destination_not_evaluated",
+                ),
             )
 
         cached_forecast = await self.forecast_cache.async_get_forecast(
             destination.latitude,
             destination.longitude,
             forecast_days,
+            location_name=destination.name,
             force=force_weather_refresh,
         )
         forecasts = cached_forecast.forecasts
+        weather_metadata = _destination_weather_metadata(
+            destination,
+            cached_forecast.provider,
+            cached_forecast.status,
+            cached_forecast.data_quality_reason,
+            cache_age_hours=cached_forecast.cache_age_hours,
+            fetched_at=cached_forecast.fetched_at,
+            missing_fields=cached_forecast.missing_fields,
+        )
         scores = {forecast.date: calculate_ride_score(forecast, activity_profile) for forecast in forecasts}
         best_forecast = max(forecasts, key=lambda item: scores[item.date].score, default=None)
         best_score = scores[best_forecast.date].score if best_forecast else None
@@ -559,6 +577,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             available=bool(forecasts),
             explanation=explanation,
             exclusion_reasons=exclusion_reasons,
+            weather=weather_metadata,
         )
 
 
@@ -737,6 +756,13 @@ def _opportunity_payload(
         "explanation": f"{window.trip_explanation} {experience.explanation}",
         "window_type": "weekend" if _is_weekend_window(window) else "weekday",
         "days_until": _days_until(window.start_day),
+        "weather_status": (result.weather or {}).get("weather_status"),
+        "weather_provider_used": (result.weather or {}).get("weather_provider_used"),
+        "weather_data_quality_reason": (result.weather or {}).get("weather_data_quality_reason"),
+        "forecast_location_name": (result.weather or {}).get("forecast_location_name"),
+        "forecast_latitude": (result.weather or {}).get("forecast_latitude"),
+        "forecast_longitude": (result.weather or {}).get("forecast_longitude"),
+        "forecast_cache_age_hours": (result.weather or {}).get("forecast_cache_age_hours"),
     }
     opportunity["decision_trace"] = _decision_trace(
         opportunity,
@@ -816,6 +842,10 @@ def _compact_table_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
         "verdict": opportunity["verdict"],
         "main_reason": opportunity["main_reason"],
         "main_tradeoff": opportunity["main_tradeoff"],
+        "weather_status": opportunity.get("weather_status"),
+        "weather_provider_used": opportunity.get("weather_provider_used"),
+        "forecast_location_name": opportunity.get("forecast_location_name"),
+        "forecast_cache_age_hours": opportunity.get("forecast_cache_age_hours"),
     }
 
 
@@ -825,6 +855,29 @@ def _strategy_label(strategy: str) -> str:
         TRAVEL_STRATEGY_MOTORCYCLE_SCENIC: "Binnendoor / scenic",
         TRAVEL_STRATEGY_TRAILER: "Aanhangertransport",
     }.get(strategy, strategy)
+
+
+def _destination_weather_metadata(
+    destination: DestinationArea,
+    provider: str | None,
+    status: str,
+    quality_reason: str,
+    *,
+    cache_age_hours: float | None = None,
+    fetched_at: str | None = None,
+    missing_fields: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "weather_status": status,
+        "weather_provider_used": provider or "none",
+        "weather_data_quality_reason": quality_reason,
+        "forecast_location_name": destination.name,
+        "forecast_latitude": round(destination.latitude, 3),
+        "forecast_longitude": round(destination.longitude, 3),
+        "forecast_cache_age_hours": cache_age_hours,
+        "fetched_at": fetched_at,
+        "missing_fields": missing_fields or [],
+    }
 
 
 def _main_reason(destination: str, experience: Any, window: Any) -> str:
@@ -949,6 +1002,10 @@ def _compact_strategy_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]
         "distance_score": opportunity["distance_score"],
         "main_reason": opportunity["main_reason"],
         "main_tradeoff": opportunity["main_tradeoff"],
+        "weather_status": opportunity.get("weather_status"),
+        "weather_provider_used": opportunity.get("weather_provider_used"),
+        "forecast_location_name": opportunity.get("forecast_location_name"),
+        "forecast_cache_age_hours": opportunity.get("forecast_cache_age_hours"),
     }
 
 
@@ -964,6 +1021,10 @@ def _strategy_rejection_summary(opportunity: dict[str, Any] | None) -> dict[str,
         "strategy_label": opportunity["strategy_label"],
         "main_reason": opportunity["main_reason"],
         "main_tradeoff": opportunity["main_tradeoff"],
+        "weather_status": opportunity.get("weather_status"),
+        "weather_provider_used": opportunity.get("weather_provider_used"),
+        "forecast_location_name": opportunity.get("forecast_location_name"),
+        "forecast_cache_age_hours": opportunity.get("forecast_cache_age_hours"),
     }
 
 
@@ -1041,6 +1102,10 @@ def _excluded_destinations(results: list[DestinationResult]) -> list[dict[str, s
                 "destination": result.destination.name,
                 "reason": reason,
                 "details": _exclusion_details(reason, result),
+                "forecast_location_name": (result.weather or {}).get("forecast_location_name"),
+                "weather_provider_used": (result.weather or {}).get("weather_provider_used"),
+                "weather_status": (result.weather or {}).get("weather_status"),
+                "forecast_cache_age_hours": (result.weather or {}).get("forecast_cache_age_hours"),
             }
         )
     return excluded
@@ -1528,16 +1593,25 @@ def _active_helper_states(
     return controls
 
 
-def _weather_providers(api_client: Any) -> dict[str, Any]:
+def _weather_providers(
+    api_client: Any,
+    hass: HomeAssistant | None = None,
+    config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Normalize one or more weather provider clients."""
     if isinstance(api_client, dict):
-        return {str(provider): client for provider, client in api_client.items()}
-    if isinstance(api_client, (list, tuple)):
-        return {
+        providers = {str(provider): client for provider, client in api_client.items()}
+    elif isinstance(api_client, (list, tuple)):
+        providers = {
             str(getattr(client, "provider_name", f"provider_{index + 1}")): client
             for index, client in enumerate(api_client)
         }
-    return {str(getattr(api_client, "provider_name", "open_meteo")): api_client}
+    else:
+        providers = {str(getattr(api_client, "provider_name", "open_meteo")): api_client}
+    weather_map = (config or {}).get(CONF_WEATHER_ENTITY_MAP)
+    if hass is not None and isinstance(weather_map, dict) and weather_map:
+        providers["home_assistant_weather_entity"] = HomeAssistantWeatherEntityClient(hass, weather_map)
+    return providers
 
 
 def _trip_planning_profile(

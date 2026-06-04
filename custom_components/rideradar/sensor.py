@@ -405,6 +405,7 @@ class RideRadarDestinationSensor(CoordinatorEntity[RideRadarDataCoordinator], Se
             "wind_gusts": forecast.wind_gusts_kmh if forecast else None,
             "cloud_cover": forecast.cloud_cover if forecast else None,
             "weather_code": forecast.weather_code if forecast else None,
+            "weather": result.weather or {},
             "reachable": result.reachable,
             "explanation": result.explanation,
             "exclusion_reasons": result.exclusion_reasons,
