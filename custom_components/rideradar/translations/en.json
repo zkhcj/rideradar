@@ -3,33 +3,25 @@
     "step": {
       "user": {
         "title": "RideRadar start location",
-        "description": "Search for the place where your rides usually start. You can use a city, village, address, or landmark. Examples: `Brussels`, `Luxembourg City`, `Aachen Hbf`, `Market Square Maastricht`. RideRadar will show the resolved address and coordinates before saving.",
+        "description": "Search for the place where your rides usually start. You can use a city, village, address, or landmark. Examples: `Brussels`, `Luxembourg City`, `Aachen Hbf`, `Market Square Maastricht`. RideRadar will show matching locations in a list.",
         "data": {
           "start_address": "Start address or place"
         }
       },
       "choose_location": {
         "title": "Choose start location",
-        "description": "Several places matched your search. Choose the one RideRadar should use as your trip start.",
+        "description": "Choose the location RideRadar should use as your trip start. Selecting a location accepts it.",
         "data": {
           "location": "Resolved location"
         }
       },
-      "confirm_location": {
-        "title": "Confirm start location",
-        "description": "RideRadar found **{address}**. Coordinates: **{latitude}**, **{longitude}**. Continue only if this is the right start point. Clear the checkbox to search again.",
-        "data": {
-          "confirm_location": "This is the correct start location"
-        }
-      },
       "settings": {
         "title": "RideRadar trip settings",
-        "description": "Choose sensible defaults for ride range, forecast window, trailer support, and destination areas. You can adjust dynamic planning controls from the dashboard later.",
+        "description": "Choose sensible defaults for ride range, forecast window, and destination areas. You can adjust dynamic planning controls from the dashboard later.",
         "data": {
           "max_route_distance_km": "Maximum route distance",
           "forecast_days": "Forecast horizon days",
           "preferred_trip_duration": "Default trip duration",
-          "trailer_support_enabled": "Enable trailer transport mode",
           "enabled_default_destinations": "Enabled default destinations"
         }
       }
@@ -54,43 +46,32 @@
     "step": {
       "init": {
         "title": "RideRadar settings",
-        "description": "Current start location: **{address}**. Coordinates: **{latitude}**, **{longitude}**. Edit the address or place name to resolve a new start location; coordinates are shown only for confirmation.",
+        "description": "Current start location: **{address}**. Coordinates: **{latitude}**, **{longitude}**. Edit the address or place name to search for a new start location.",
         "data": {
           "start_address": "Start address or place",
           "max_route_distance_km": "Maximum route distance",
           "forecast_days": "Forecast horizon days",
           "preferred_trip_duration": "Preferred trip duration",
-          "custom_trip_duration_days": "Custom trip duration",
-          "activity_profile": "Activity profile",
-          "detour_factor": "Fallback route detour factor",
-          "trailer_support_enabled": "Enable trailer transport strategy",
           "enabled_destinations": "Enabled destinations"
         }
       },
       "start_location": {
         "title": "Change start location",
-        "description": "Search for a new trip start. Examples: `Brussels`, `Luxembourg City`, `Aachen Hbf`, `Market Square Maastricht`. RideRadar will show the resolved address and coordinates before saving.",
+        "description": "Search for a new trip start. Examples: `Brussels`, `Luxembourg City`, `Aachen Hbf`, `Market Square Maastricht`. RideRadar will show matching locations in a list.",
         "data": {
           "start_address": "Start address or place"
         }
       },
       "choose_location": {
         "title": "Choose start location",
-        "description": "Several places matched your search. Choose the one RideRadar should use as your trip start.",
+        "description": "Choose the location RideRadar should use as your trip start. Selecting a location accepts it.",
         "data": {
           "location": "Resolved location"
         }
       },
-      "confirm_location": {
-        "title": "Confirm start location",
-        "description": "RideRadar found **{address}**. Coordinates: **{latitude}**, **{longitude}**. Continue only if this is the right start point. Clear the checkbox to search again.",
-        "data": {
-          "confirm_location": "This is the correct start location"
-        }
-      },
       "manual_start_location": {
         "title": "Manual start coordinates",
-        "description": "Advanced fallback only. Prefer searching by place name first so RideRadar can confirm the resolved address.",
+        "description": "Advanced fallback only. Prefer searching by place name first so RideRadar can resolve a readable address.",
         "data": {
           "start_address": "Location label",
           "start_latitude": "Start latitude",
@@ -98,8 +79,8 @@
         }
       },
       "settings": {
-        "title": "Trip settings",
-        "description": "Change default range, forecast days, trip duration, and trailer support. Scenario controls such as weekend-only, travel strategy, custom days, available time, and max approach time are native dashboard entities.",
+        "title": "Advanced trip settings",
+        "description": "Change advanced defaults, including trailer transport mode. Only enable trailer transport if you really use a car and trailer for motorcycle trips.",
         "data": {
           "max_route_distance_km": "Maximum route distance",
           "forecast_days": "Forecast horizon days",

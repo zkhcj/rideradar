@@ -21,6 +21,7 @@ from custom_components.rideradar.const import (
     CONF_START_ADDRESS,
     CONF_START_LATITUDE,
     CONF_START_LONGITUDE,
+    CONF_TRAILER_SUPPORT_ENABLED,
     DEFAULT_ACTIVITY_PROFILE,
     DEFAULT_CUSTOM_TRIP_DURATION_DAYS,
     DEFAULT_DETOUR_FACTOR,
@@ -129,9 +130,9 @@ async def test_config_flow_saves_geocoded_start_location(hass, monkeypatch) -> N
     )
 
     assert result["type"] == "form"
-    assert result["step_id"] == "confirm_location"
+    assert result["step_id"] == "choose_location"
 
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={"location": "0"})
     assert result["step_id"] == "settings"
 
     result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input=_settings_input())
@@ -153,8 +154,7 @@ async def test_config_flow_allows_choosing_geocode_match(hass, monkeypatch) -> N
 
     assert result["step_id"] == "choose_location"
     result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={"location": "1"})
-    assert result["step_id"] == "confirm_location"
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={})
+    assert result["step_id"] == "settings"
     result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input=_settings_input())
 
     assert result["type"] == "create_entry"
@@ -198,13 +198,10 @@ async def test_config_flow_start_location_uses_search_as_primary_path(hass, monk
         data={CONF_START_ADDRESS: "Manual", "manual_mode": True},
     )
 
-    assert result["step_id"] == "confirm_location"
-    assert result["description_placeholders"]["address"] == "Brussels, Belgium"
-    assert result["description_placeholders"]["latitude"] == "50.85030"
-    assert result["description_placeholders"]["longitude"] == "4.35170"
+    assert result["step_id"] == "choose_location"
 
 
-async def test_config_flow_confirm_location_can_search_again(hass, monkeypatch) -> None:
+async def test_config_flow_does_not_require_extra_location_confirmation(hass, monkeypatch) -> None:
     _patch_setup(monkeypatch)
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
@@ -212,12 +209,10 @@ async def test_config_flow_confirm_location_can_search_again(hass, monkeypatch) 
         data={CONF_START_ADDRESS: "Brussels"},
     )
 
-    assert result["step_id"] == "confirm_location"
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], user_input={"confirm_location": False}
-    )
+    assert result["step_id"] == "choose_location"
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={"location": "0"})
 
-    assert result["step_id"] == "user"
+    assert result["step_id"] == "settings"
 
 
 async def test_config_flow_settings_schema_omits_custom_duration_fields(hass, monkeypatch) -> None:
@@ -227,12 +222,13 @@ async def test_config_flow_settings_schema_omits_custom_duration_fields(hass, mo
         context={"source": config_entries.SOURCE_USER},
         data={CONF_START_ADDRESS: "Brussels"},
     )
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={"location": "0"})
 
     schema_keys = [key.schema for key in result["data_schema"].schema]
     assert CONF_CUSTOM_TRIP_DURATION_DAYS not in schema_keys
     assert CONF_ACTIVITY_PROFILE not in schema_keys
     assert CONF_DETOUR_FACTOR not in schema_keys
+    assert "trailer_support_enabled" not in schema_keys
 
 
 async def test_config_flow_saves_flexible_trip_duration(hass, monkeypatch) -> None:
@@ -242,7 +238,7 @@ async def test_config_flow_saves_flexible_trip_duration(hass, monkeypatch) -> No
         context={"source": config_entries.SOURCE_USER},
         data={CONF_START_ADDRESS: "Brussels"},
     )
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={"location": "0"})
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
         user_input=_settings_input(
@@ -270,8 +266,29 @@ async def test_options_flow_shows_all_normal_settings_without_action_dropdown(ha
     assert "action" not in schema_keys
     assert CONF_START_ADDRESS in schema_keys
     assert "enabled_destinations" in schema_keys
+    assert "trailer_support_enabled" not in schema_keys
     assert result["description_placeholders"]["address"] == "Brussels, Belgium"
     assert result["description_placeholders"]["latitude"] == "50.85030"
+
+
+async def test_advanced_options_can_enable_trailer_transport(hass, monkeypatch) -> None:
+    _patch_setup(monkeypatch)
+    entry = _entry()
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    flow = hass.config_entries.options._progress[result["flow_id"]]
+    result = await flow.async_step_settings(
+        {
+            CONF_MAX_ROUTE_DISTANCE_KM: DEFAULT_MAX_ROUTE_DISTANCE_KM,
+            CONF_FORECAST_DAYS: DEFAULT_FORECAST_DAYS,
+            CONF_PREFERRED_TRIP_DURATION: DEFAULT_PREFERRED_TRIP_DURATION,
+            CONF_TRAILER_SUPPORT_ENABLED: True,
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_TRAILER_SUPPORT_ENABLED] is True
 
 
 async def test_options_flow_edits_normal_settings_and_destinations(hass, monkeypatch) -> None:
@@ -308,16 +325,13 @@ async def test_options_flow_confirms_changed_start_location(hass, monkeypatch) -
         user_input=_normal_options_input(entry, **{CONF_START_ADDRESS: "Utrecht, Nederland"}),
     )
 
-    assert result["step_id"] == "confirm_location"
-    assert result["description_placeholders"]["address"] == "Brussels, Belgium"
-    assert result["description_placeholders"]["latitude"] == "50.85030"
-
-    result = await hass.config_entries.options.async_configure(result["flow_id"], user_input={})
+    assert result["step_id"] == "choose_location"
+    result = await hass.config_entries.options.async_configure(result["flow_id"], user_input={"location": "0"})
     assert result["type"] == "create_entry"
     assert result["data"][CONF_START_ADDRESS] == "Brussels, Belgium"
 
 
-async def test_options_flow_confirm_location_can_search_again(hass, monkeypatch) -> None:
+async def test_options_flow_selects_changed_start_location_without_extra_confirmation(hass, monkeypatch) -> None:
     _patch_setup(monkeypatch)
     entry = _entry()
     entry.add_to_hass(hass)
@@ -328,12 +342,10 @@ async def test_options_flow_confirm_location_can_search_again(hass, monkeypatch)
         user_input=_normal_options_input(entry, **{CONF_START_ADDRESS: "Utrecht, Nederland"}),
     )
 
-    assert result["step_id"] == "confirm_location"
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], user_input={"confirm_location": False}
-    )
+    assert result["step_id"] == "choose_location"
+    result = await hass.config_entries.options.async_configure(result["flow_id"], user_input={"location": "0"})
 
-    assert result["step_id"] == "start_location"
+    assert result["type"] == "create_entry"
 
 
 async def test_options_flow_preserves_previous_start_location_when_not_changed(hass, monkeypatch) -> None:

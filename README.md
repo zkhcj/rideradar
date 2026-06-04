@@ -100,7 +100,7 @@ sections:
           {% set opportunity = opportunity if opportunity is mapping else {} %}
           {% set period = opportunity.get('period', 'Nog niet beschikbaar') %}
           {% set duration = opportunity.get('duration_days', state_attr('sensor.rideradar_trip_duration', 'duration_label') | default('Nog niet beschikbaar')) %}
-          {% set reason = opportunity.get('recommendation_reason', 'Nog geen aanbevelingsreden beschikbaar.') %}
+          {% set reason = opportunity.get('main_reason', opportunity.get('recommendation_reason', 'Nog geen aanbevelingsreden beschikbaar.')) %}
           {% if score < 70 %}
           ## Geen sterke rit gevonden
           **Minst slechte optie:** {{ best if best not in ['unknown', 'unavailable', none, ''] else 'Nog niet beschikbaar' }}
@@ -123,191 +123,143 @@ sections:
 
           {{ reason }}
       - type: markdown
-        title: Weekendrit
+        title: Coming 8 dagen - direct
         content: |
-          {% set item = state_attr('sensor.rideradar_best_weekend_opportunity', 'opportunity') %}
+          {% set group = state_attr('sensor.rideradar_top_week_direct_opportunities', 'opportunities') or [] %}
+          {% set rejected = state_attr('sensor.rideradar_top_week_direct_opportunities', 'best_rejected_candidate') %}
+          {% if group %}
+          | # | Bestemming | Score | Dagen | Periode |
+          |---:|---|---:|---:|---|
+          {% for item in group %}
           {% set item = item if item is mapping else {} %}
-          {% if item %}
-          **{{ item.get('destination', 'Nog niet beschikbaar') }}** - {{ item.get('ride_quality_score', 'n.b.') }}/100
-
-          {{ item.get('period', 'Nog niet beschikbaar') }}
-
-          {{ item.get('verdict', 'n.b.') | replace('Excellent', 'Uitstekend') | replace('Very good', 'Zeer goed') | replace('Good', 'Goed') | replace('Mediocre', 'Matig') | replace('Poor', 'Slecht') | replace('Not recommended', 'Niet aanbevolen') }}
-
-          {{ item.get('recommendation_reason', 'Nog geen aanbevelingsreden beschikbaar.') }}
-          {% else %}
-          Geen aparte weekendkans beschikbaar binnen de huidige instellingen.
-          {% endif %}
-      - type: markdown
-        title: Ranking
-        content: |
-          {% set windows = state_attr('sensor.rideradar_best_opportunities', 'opportunities') or [] %}
-          | # | Bestemming | Score | Weer | Efficiëntie | Periode |
-          |---:|---|---:|---:|---:|---|
-          {% for item in windows %}
-          {% set item = item if item is mapping else {} %}
-          | {{ loop.index }} | {{ item.get('destination', 'n.b.') }} | {{ item.get('ride_quality_score', 'n.b.') }}/100 | {{ item.get('weather_score', 'n.b.') }}/100 | {{ item.get('trip_efficiency_score', 'n.b.') }}/100 | {{ item.get('period', 'Nog niet beschikbaar') }} |
-          {% endfor %}
-
-  - type: grid
-    cards:
-      - type: markdown
-        title: Top 3 deze week
-        content: |
-          {% set windows = state_attr('sensor.rideradar_top_week_opportunities', 'opportunities') or [] %}
-          {% set rejected = state_attr('sensor.rideradar_top_week_opportunities', 'best_below_threshold') %}
-          {% set reason_labels = {
-            'below_minimum_score': 'Score onder minimum',
-            'weather_too_poor': 'Weer te slecht',
-            'stability_too_low': 'Stabiliteit te laag',
-            'weekend_only_filter': 'Valt buiten weekendfilter',
-            'preferred_start_day_filter': 'Valt buiten voorkeursdag',
-            'trailer_unavailable': 'Aanhanger niet beschikbaar',
-            'trailer_required_but_unavailable': 'Aanhanger nodig, maar niet beschikbaar',
-            'insufficient_destination_ride_time': 'Te weinig rijtijd op bestemming',
-            'approach_time_too_high': 'Aanrijtijd te hoog',
-            'no_complete_window': 'Geen volledig weervenster',
-            'disabled_destination': 'Bestemming uitgeschakeld',
-            'too_far': 'Buiten ingestelde afstand'
-          } %}
-          {% if windows %}
-          {% for item in windows %}
-          {% set item = item if item is mapping else {} %}
-          {{ loop.index }}. **{{ item.get('destination', 'n.b.') }}** - {{ item.get('ride_quality_score', 'n.b.') }}/100
-
-          {{ item.get('period', 'Nog niet beschikbaar') }}
-
+          | {{ loop.index }} | {{ item.get('destination', 'n.b.') }} | {{ item.get('ride_quality_score', 'n.b.') }}/100 | {{ item.get('duration_days', 'n.b.') }} | {{ item.get('period', 'Nog niet beschikbaar') }} |
           {% endfor %}
           {% else %}
-          Geen kansen boven 70 gevonden.
+          Geen directe kansen boven 70.
 
-          {% if rejected %}
-          {% set rejected = rejected if rejected is mapping else {} %}
-          Beste optie deze week: **{{ rejected.get('destination', 'Nog niet beschikbaar') }} {{ rejected.get('ride_quality_score', 'n.b.') }}/100**
+          {% if rejected is mapping %}
+          Beste afgewezen optie: **{{ rejected.get('destination', 'n.b.') }} {{ rejected.get('ride_quality_score', 'n.b.') }}/100**
 
           {{ rejected.get('period', 'Nog niet beschikbaar') }}
 
-          {% set blocking = rejected.get('main_blocking_factor', rejected.get('reason', 'onbekend')) %}
-          Belangrijkste reden: {{ reason_labels.get(blocking, blocking) }}
-          {% else %}
-          Er zijn nog geen kandidaten binnen de huidige instellingen.
+          {{ rejected.get('main_reason', 'Geen reden beschikbaar.') }}
           {% endif %}
           {% endif %}
-      - type: markdown
-        title: Volgende kans
-        content: |
-          {% set item = state_attr('sensor.rideradar_best_next_available_opportunity', 'opportunity') %}
-          {% set item = item if item is mapping else {} %}
-          {% if item %}
-          **{{ item.get('destination', 'Nog niet beschikbaar') }}** - {{ item.get('ride_quality_score', 'n.b.') }}/100
-
-          {{ item.get('period', 'Nog niet beschikbaar') }}
-
-          Oordeel: {{ item.get('verdict', 'n.b.') | replace('Excellent', 'Uitstekend') | replace('Very good', 'Zeer goed') | replace('Good', 'Goed') | replace('Mediocre', 'Matig') | replace('Poor', 'Slecht') | replace('Not recommended', 'Niet aanbevolen') }}
-          {% else %}
-          Geen bruikbare kans beschikbaar.
-          {% endif %}
-      - type: markdown
-        title: Score-opbouw
-        content: |
-          {% set trace = state_attr('sensor.rideradar_best_summary', 'best_decision_trace') or {} %}
-          {% set scores = trace.get('scores', {}) if trace is mapping else {} %}
-          | Component | Score |
-          |---|---:|
-          | Weer | {{ scores.get('weather_score', 'n.b.') }}/100 |
-          | Stabiliteit | {{ scores.get('stability_score', 'n.b.') }}/100 |
-          | Temperatuur | {{ scores.get('temperature_score', 'n.b.') }}/100 |
-          | Afstand | {{ scores.get('distance_score', 'n.b.') }}/100 |
-          | Vakantiedruk | {{ scores.get('holiday_pressure_score', 'n.b.') }}/100 |
-          | Toegang | {{ scores.get('access_score', 'n.b.') }}/100 |
-          | Trip efficiency | {{ scores.get('trip_efficiency_score', 'n.b.') }}/100 |
-          | Eindscore | {{ scores.get('ride_quality_score', 'n.b.') }}/100 |
-
   - type: grid
     cards:
       - type: markdown
-        title: Beste kansen in forecast
+        title: Coming 8 dagen - binnendoor
         content: |
-          {% set windows = state_attr('sensor.rideradar_top_month_opportunities', 'opportunities') or [] %}
-          {% set rejected = state_attr('sensor.rideradar_top_month_opportunities', 'best_below_threshold') %}
-          {% set reason_labels = {
-            'below_minimum_score': 'Score onder minimum',
-            'weather_too_poor': 'Weer te slecht',
-            'stability_too_low': 'Stabiliteit te laag',
-            'weekend_only_filter': 'Valt buiten weekendfilter',
-            'preferred_start_day_filter': 'Valt buiten voorkeursdag',
-            'trailer_unavailable': 'Aanhanger niet beschikbaar',
-            'trailer_required_but_unavailable': 'Aanhanger nodig, maar niet beschikbaar',
-            'insufficient_destination_ride_time': 'Te weinig rijtijd op bestemming',
-            'approach_time_too_high': 'Aanrijtijd te hoog',
-            'no_complete_window': 'Geen volledig weervenster',
-            'disabled_destination': 'Bestemming uitgeschakeld',
-            'too_far': 'Buiten ingestelde afstand'
-          } %}
-          {% if windows %}
-          {% for item in windows %}
+          {% set group = state_attr('sensor.rideradar_top_week_scenic_opportunities', 'opportunities') or [] %}
+          {% set rejected = state_attr('sensor.rideradar_top_week_scenic_opportunities', 'best_rejected_candidate') %}
+          {% if group %}
+          | # | Bestemming | Score | Dagen | Periode |
+          |---:|---|---:|---:|---|
+          {% for item in group %}
           {% set item = item if item is mapping else {} %}
-          {{ loop.index }}. **{{ item.get('destination', 'n.b.') }}** - {{ item.get('ride_quality_score', 'n.b.') }}/100
-
-          {{ item.get('period', 'Nog niet beschikbaar') }}
-
+          | {{ loop.index }} | {{ item.get('destination', 'n.b.') }} | {{ item.get('ride_quality_score', 'n.b.') }}/100 | {{ item.get('duration_days', 'n.b.') }} | {{ item.get('period', 'Nog niet beschikbaar') }} |
           {% endfor %}
           {% else %}
-          Geen kansen boven 70 gevonden in de forecast horizon.
+          Geen scenic kansen boven 70.
 
-          {% if rejected %}
-          {% set rejected = rejected if rejected is mapping else {} %}
+          {% if rejected is mapping %}
+          Beste afgewezen optie: **{{ rejected.get('destination', 'n.b.') }} {{ rejected.get('ride_quality_score', 'n.b.') }}/100**
+
+          {{ rejected.get('period', 'Nog niet beschikbaar') }}
+
+          {{ rejected.get('main_reason', 'Geen reden beschikbaar.') }}
+          {% endif %}
+          {% endif %}
+      - type: conditional
+        conditions:
+          - entity: sensor.rideradar_top_week_trailer_opportunities
+            state_not: unavailable
+        card:
+          type: markdown
+          title: Coming 8 dagen - aanhanger
+          content: |
+            {% set group = state_attr('sensor.rideradar_top_week_trailer_opportunities', 'opportunities') or [] %}
+            {% set rejected = state_attr('sensor.rideradar_top_week_trailer_opportunities', 'best_rejected_candidate') %}
+            {% if group %}
+            | # | Bestemming | Score | Dagen | Periode |
+            |---:|---|---:|---:|---|
+            {% for item in group %}
+            {% set item = item if item is mapping else {} %}
+            | {{ loop.index }} | {{ item.get('destination', 'n.b.') }} | {{ item.get('ride_quality_score', 'n.b.') }}/100 | {{ item.get('duration_days', 'n.b.') }} | {{ item.get('period', 'Nog niet beschikbaar') }} |
+            {% endfor %}
+            {% else %}
+            Geen aanhangerkansen boven 70.
+
+            {% if rejected is mapping %}
+            Beste afgewezen optie: **{{ rejected.get('destination', 'n.b.') }} {{ rejected.get('ride_quality_score', 'n.b.') }}/100**
+
+            {{ rejected.get('period', 'Nog niet beschikbaar') }}
+            {% endif %}
+            {% endif %}
+  - type: grid
+    cards:
+      - type: markdown
+        title: Forecast - direct
+        content: |
+          {% set group = state_attr('sensor.rideradar_top_forecast_direct_opportunities', 'opportunities') or [] %}
+          {% set rejected = state_attr('sensor.rideradar_top_forecast_direct_opportunities', 'best_rejected_candidate') %}
+          {% if group %}
+          | # | Bestemming | Score | Dagen | Periode |
+          |---:|---|---:|---:|---|
+          {% for item in group %}
+          {% set item = item if item is mapping else {} %}
+          | {{ loop.index }} | {{ item.get('destination', 'n.b.') }} | {{ item.get('ride_quality_score', 'n.b.') }}/100 | {{ item.get('duration_days', 'n.b.') }} | {{ item.get('period', 'Nog niet beschikbaar') }} |
+          {% endfor %}
+          {% else %}
+          Geen directe forecastkansen boven 70.
+
+          {% if rejected is mapping %}
           Beste afgewezen optie: **{{ rejected.get('destination', 'Nog niet beschikbaar') }} {{ rejected.get('ride_quality_score', 'n.b.') }}/100**
 
           {{ rejected.get('period', 'Nog niet beschikbaar') }}
-
-          {% set blocking = rejected.get('main_blocking_factor', rejected.get('reason', 'onbekend')) %}
-          Belangrijkste reden: {{ reason_labels.get(blocking, blocking) }}
           {% endif %}
           {% endif %}
-      - type: entities
-        title: Snelle instellingen
-        entities:
-          - entity: select.rideradar_trip_duration
-            name: Ritduur
-          - entity: number.rideradar_forecast_horizon_days
-            name: Forecast horizon
-          - entity: switch.rideradar_weekend_only
-            name: Alleen weekend
-          - entity: select.rideradar_travel_strategy
-            name: Reisstrategie
-          - entity: switch.rideradar_trailer_available
-            name: Aanhanger vandaag beschikbaar
-      - type: entities
-        title: Geavanceerde instellingen
-        entities:
-          - entity: number.rideradar_trip_duration_days
-            name: Aantal dagen
-          - entity: select.rideradar_preferred_start_day
-            name: Gewenste startdag
-          - entity: number.rideradar_available_hours_per_day
-            name: Beschikbare uren per dag
-          - entity: number.rideradar_max_approach_time_hours
-            name: Max aanrijtijd
-
-  - type: grid
-    cards:
       - type: markdown
-        title: Alle kandidaten
+        title: Forecast - binnendoor
         content: |
-          {% set windows = state_attr('sensor.rideradar_best_opportunities', 'opportunities') or [] %}
-          {% set strategy_labels = {
-            'motorcycle_direct': 'Motor direct',
-            'motorcycle_scenic': 'Scenische motorroute',
-            'trailer': 'Aanhanger'
-          } %}
-          | Bestemming | Score | Duur | Weer | Stabiliteit | Efficiëntie | Afstand | Strategie | Verdict | Trade-off |
-          |---|---:|---:|---:|---:|---:|---:|---|---|---|
-          {% for item in windows %}
+          {% set group = state_attr('sensor.rideradar_top_forecast_scenic_opportunities', 'opportunities') or [] %}
+          {% set rejected = state_attr('sensor.rideradar_top_forecast_scenic_opportunities', 'best_rejected_candidate') %}
+          {% if group %}
+          | # | Bestemming | Score | Dagen | Periode |
+          |---:|---|---:|---:|---|
+          {% for item in group %}
           {% set item = item if item is mapping else {} %}
-          {% set tradeoffs = item.get('tradeoffs', ['Geen grote trade-off']) %}
-          | {{ item.get('destination', 'n.b.') }} | {{ item.get('ride_quality_score', 'n.b.') }}/100 | {{ item.get('duration_days', 'n.b.') }} | {{ item.get('weather_score', 'n.b.') }}/100 | {{ item.get('stability_score', 'n.b.') }}/100 | {{ item.get('trip_efficiency_score', 'n.b.') }}/100 | {{ item.get('route_distance_km', 0) | round(0) }} km | {{ strategy_labels.get(item.get('travel_strategy'), item.get('travel_strategy', 'n.b.')) }} | {{ item.get('verdict', 'n.b.') | replace('Excellent', 'Uitstekend') | replace('Very good', 'Zeer goed') | replace('Good', 'Goed') | replace('Mediocre', 'Matig') | replace('Poor', 'Slecht') | replace('Not recommended', 'Niet aanbevolen') }} | {{ tradeoffs[0] if tradeoffs else 'Geen grote trade-off' }} |
+          | {{ loop.index }} | {{ item.get('destination', 'n.b.') }} | {{ item.get('ride_quality_score', 'n.b.') }}/100 | {{ item.get('duration_days', 'n.b.') }} | {{ item.get('period', 'Nog niet beschikbaar') }} |
           {% endfor %}
+          {% else %}
+          Geen scenic forecastkansen boven 70.
+
+          {% if rejected is mapping %}
+          Beste afgewezen optie: **{{ rejected.get('destination', 'Nog niet beschikbaar') }} {{ rejected.get('ride_quality_score', 'n.b.') }}/100**
+
+          {{ rejected.get('period', 'Nog niet beschikbaar') }}
+          {% endif %}
+          {% endif %}
+      - type: conditional
+        conditions:
+          - entity: sensor.rideradar_top_forecast_trailer_opportunities
+            state_not: unavailable
+        card:
+          type: markdown
+          title: Forecast - aanhanger
+          content: |
+            {% set group = state_attr('sensor.rideradar_top_forecast_trailer_opportunities', 'opportunities') or [] %}
+            {% set rejected = state_attr('sensor.rideradar_top_forecast_trailer_opportunities', 'best_rejected_candidate') %}
+            {% if group %}
+            | # | Bestemming | Score | Dagen | Periode |
+            |---:|---|---:|---:|---|
+            {% for item in group %}
+            {% set item = item if item is mapping else {} %}
+            | {{ loop.index }} | {{ item.get('destination', 'n.b.') }} | {{ item.get('ride_quality_score', 'n.b.') }}/100 | {{ item.get('duration_days', 'n.b.') }} | {{ item.get('period', 'Nog niet beschikbaar') }} |
+            {% endfor %}
+            {% else %}
+            Geen aanhanger forecastkansen boven 70.
+            {% endif %}
       - type: markdown
         title: Uitgesloten bestemmingen
         content: |
@@ -339,64 +291,120 @@ sections:
           {% if not excluded %}
           Geen uitgesloten bestemmingen.
           {% endif %}
-      - type: markdown
-        title: Waarom deze keuze?
-        content: |
-          {% set trace = state_attr('sensor.rideradar_best_summary', 'best_decision_trace') or {} %}
-          {% set result = trace.get('result', {}) if trace is mapping else {} %}
-          {% set opportunity = state_attr('sensor.rideradar_best_next_available_opportunity', 'opportunity') or {} %}
-          {% set opportunity = opportunity if opportunity is mapping else {} %}
-          {% set rec_type = result.get('recommendation_type', opportunity.get('recommendation_type', 'recommended')) if result is mapping else opportunity.get('recommendation_type', 'recommended') %}
-          {% if rec_type == 'least_bad_option' %}
-          **Type advies:** Minst slechte optie
-          {% else %}
-          **Type advies:** Aanbevolen rit
-          {% endif %}
-
-          {{ opportunity.get('recommendation_reason', 'Nog geen aanbevelingsreden beschikbaar.') }}
-
-          {% for tradeoff in opportunity.get('tradeoffs', []) %}
-          - {{ tradeoff }}
-          {% endfor %}
 ```
 
 If the native control entities are missing, reload the RideRadar integration from Settings > Devices & services. A full Home Assistant restart should not be required during normal configuration changes.
 
 Screenshot placeholder: add your dashboard screenshot at `docs/images/rideradar-dashboard-hero.png` after importing the view above.
 
-### Native Dashboard Controls
+## Optional: RideRadar Settings & Debug View
 
-RideRadar creates these controls automatically. Place them above the RideRadar cards if you want a compact control panel.
+The default dashboard is intentionally rider-first. Use this optional view when you want controls and diagnostics on a separate page. RideRadar creates these controls automatically; legacy `input_*` helpers are only read as fallback for older dashboards.
 
 ```yaml
-type: entities
-title: RideRadar controls
-entities:
-  - entity: select.rideradar_trip_duration
-    name: Trip duration
-  - entity: number.rideradar_trip_duration_days
-    name: Custom or flexible maximum days
-  - entity: number.rideradar_forecast_horizon_days
-    name: Forecast horizon
-  - entity: select.rideradar_preferred_start_day
-    name: Preferred start day
-  - entity: switch.rideradar_weekend_only
-    name: Weekend only
-  - entity: select.rideradar_travel_strategy
-    name: Travel strategy
-  - entity: switch.rideradar_trailer_available
-    name: Trailer available today
-  - entity: number.rideradar_available_hours_per_day
-    name: Available hours per day
-  - entity: number.rideradar_max_approach_time_hours
-    name: Max approach time
+title: RideRadar Settings & Debug
+path: rideradar-debug
+icon: mdi:tune-variant
+type: sections
+max_columns: 2
+sections:
+  - type: grid
+    cards:
+      - type: entities
+        title: Scenario
+        entities:
+          - entity: select.rideradar_trip_duration
+            name: Ritduur
+          - entity: number.rideradar_trip_duration_days
+            name: Aangepaste/flexibele maximumduur
+          - entity: number.rideradar_forecast_horizon_days
+            name: Forecast horizon
+          - entity: select.rideradar_preferred_start_day
+            name: Voorkeursdag
+          - entity: switch.rideradar_weekend_only
+            name: Alleen weekend
+          - entity: select.rideradar_travel_strategy
+            name: Reisstrategie
+          - entity: switch.rideradar_trailer_available
+            name: Aanhanger vandaag beschikbaar
+          - entity: number.rideradar_available_hours_per_day
+            name: Beschikbare uren per dag
+          - entity: number.rideradar_max_approach_time_hours
+            name: Maximale aanrijtijd
+      - type: markdown
+        title: Debug trace
+        content: |
+          {% set summary = 'sensor.rideradar_best_summary' %}
+          {% set duration = 'sensor.rideradar_trip_duration' %}
+          {% set trace = state_attr(summary, 'best_decision_trace') or {} %}
+          {% set inputs = trace.get('inputs', {}) if trace is mapping else {} %}
+          {% set result = trace.get('result', {}) if trace is mapping else {} %}
+          {% set breakdown = trace.get('scores', {}) if trace is mapping else {} %}
+          {% set weights = trace.get('weights', {}) if trace is mapping else {} %}
+          {% set caps = trace.get('caps', []) if trace is mapping else [] %}
+
+          Strategie: **{{ inputs.get('travel_strategy', 'onbekend') }}**
+
+          Aanhanger beschikbaar: **{{ inputs.get('trailer_available', 'onbekend') }}**
+
+          Duur: **{{ state_attr(duration, 'duration_label') or states(duration) ~ ' dagen' }}**
+
+          Forecast horizon: **{{ inputs.get('forecast_horizon_days', 'onbekend') }} dagen**
+
+          Alleen weekend: **{{ inputs.get('weekend_only', 'onbekend') }}**
+
+          Voorkeursdag: **{{ inputs.get('preferred_start_day', 'any') }}**
+
+          Beste bestemming: **{{ states('sensor.rideradar_best_trip_destination') }}**
+
+          Beste score: **{{ states('sensor.rideradar_best_ride_quality_score') }}/100**
+
+          Adviesstatus: **{{ result.get('verdict', 'onbekend') }}**
+
+          Belangrijkste uitsluiting: **{{ state_attr(summary, 'top_exclusion_reason') or 'geen' }}**
+
+          Scores:
+          - Weer: {{ breakdown.get('weather_score', 'onbekend') }}/100
+          - Stabiliteit: {{ breakdown.get('stability_score', 'onbekend') }}/100
+          - Temperatuur: {{ breakdown.get('temperature_score', 'onbekend') }}/100
+          - Afstand: {{ breakdown.get('distance_score', 'onbekend') }}/100
+          - Vakantiedruk: {{ breakdown.get('holiday_pressure_score', 'onbekend') }}/100
+          - Toegang: {{ breakdown.get('access_score', 'onbekend') }}/100
+          - Ritefficiëntie: {{ breakdown.get('trip_efficiency_score', 'onbekend') }}/100
+
+          Gewichten:
+          - Weer: {{ weights.get('weather_score', 'onbekend') }}%
+          - Stabiliteit: {{ weights.get('stability_score', 'onbekend') }}%
+          - Temperatuur: {{ weights.get('temperature_score', 'onbekend') }}%
+          - Afstand: {{ weights.get('distance_score', 'onbekend') }}%
+          - Vakantiedruk: {{ weights.get('holiday_pressure_score', 'onbekend') }}%
+          - Toegang: {{ weights.get('access_score', 'onbekend') }}%
+          - Ritefficiëntie: {{ weights.get('trip_efficiency_score', 'onbekend') }}%
+
+          Caps:
+          {% for cap in caps %}
+          {% set cap = cap if cap is mapping else {} %}
+          - {{ cap.get('reason', 'onbekend') }}: max {{ cap.get('cap', 'onbekend') }}
+          {% else %}
+          - geen
+          {% endfor %}
+  - type: grid
+    cards:
+      - type: markdown
+        title: Kandidaten
+        content: |
+          Week direct: {{ state_attr('sensor.rideradar_top_week_direct_opportunities', 'candidate_count') | default('onbekend') }} kandidaten, {{ state_attr('sensor.rideradar_top_week_direct_opportunities', 'rejected_count') | default('onbekend') }} afgewezen
+
+          Week binnendoor: {{ state_attr('sensor.rideradar_top_week_scenic_opportunities', 'candidate_count') | default('onbekend') }} kandidaten, {{ state_attr('sensor.rideradar_top_week_scenic_opportunities', 'rejected_count') | default('onbekend') }} afgewezen
+
+          Forecast direct: {{ state_attr('sensor.rideradar_top_forecast_direct_opportunities', 'candidate_count') | default('onbekend') }} kandidaten, {{ state_attr('sensor.rideradar_top_forecast_direct_opportunities', 'rejected_count') | default('onbekend') }} afgewezen
+
+          Forecast binnendoor: {{ state_attr('sensor.rideradar_top_forecast_scenic_opportunities', 'candidate_count') | default('onbekend') }} kandidaten, {{ state_attr('sensor.rideradar_top_forecast_scenic_opportunities', 'rejected_count') | default('onbekend') }} afgewezen
 ```
 
 Supported `select.rideradar_trip_duration` values include `1 day`, `2 days`, `3 days`, `flexible`, and `custom`.
 Supported `select.rideradar_travel_strategy` values include `Motorcycle Direct`, `Motorcycle Scenic Approach`, and `Trailer Transport`.
 Trailer recommendations only appear when trailer transport mode is enabled in configuration and `switch.rideradar_trailer_available` is on. Configuration support means "this rider can use trailer transport"; runtime availability means "the trailer is available today".
-
-Legacy `input_*` helpers are still read as fallback for older dashboards, but new dashboards should use the native RideRadar entities above.
 
 ## All Options Dashboard
 
@@ -485,78 +493,11 @@ content: |
   {% endfor %}
 ```
 
-## Optional Debug Dashboard
-
-Use this while testing RideRadar decisions. It shows the selected scenario, the best score, the top exclusion reason, and the score breakdown.
-
-```yaml
-type: markdown
-title: RideRadar debug
-content: |
-  {% set summary = 'sensor.rideradar_best_summary' %}
-  {% set duration = 'sensor.rideradar_trip_duration' %}
-  {% set trace = state_attr(summary, 'best_decision_trace') or {} %}
-  {% set inputs = trace.get('inputs', {}) if trace is mapping else {} %}
-  {% set breakdown = trace.get('scores', {}) if trace is mapping else {} %}
-  {% set weights = trace.get('weights', {}) if trace is mapping else {} %}
-  {% set caps = trace.get('caps', []) if trace is mapping else [] %}
-
-  Travel strategy: **{{ inputs.get('travel_strategy', 'unknown') }}**
-
-  Trailer available: **{{ inputs.get('trailer_available', 'unknown') }}**
-
-  Duration: **{{ state_attr(duration, 'duration_label') or states(duration) ~ ' days' }}**
-
-  Forecast horizon: **{{ inputs.get('forecast_horizon_days', 'unknown') }} days**
-
-  Weekend only: **{{ inputs.get('weekend_only', 'unknown') }}**
-
-  Preferred start day: **{{ inputs.get('preferred_start_day', 'any') }}**
-
-  Best destination: **{{ states('sensor.rideradar_best_trip_destination') }}**
-
-  Best score: **{{ states('sensor.rideradar_best_ride_quality_score') }}/100**
-
-  Top exclusion reason: **{{ state_attr(summary, 'top_exclusion_reason') or 'none' }}**
-
-  Scores:
-  - Weather: {{ breakdown.get('weather_score', 'unknown') }}/100
-  - Stability: {{ breakdown.get('stability_score', 'unknown') }}/100
-  - Temperature: {{ breakdown.get('temperature_score', 'unknown') }}/100
-  - Distance: {{ breakdown.get('distance_score', 'unknown') }}/100
-  - Holiday pressure: {{ breakdown.get('holiday_pressure_score', 'unknown') }}/100
-  - Access: {{ breakdown.get('access_score', 'unknown') }}/100
-  - Trip efficiency: {{ breakdown.get('trip_efficiency_score', 'unknown') }}/100
-
-  Weights:
-  - Weather: {{ weights.get('weather_score', 'unknown') }}%
-  - Stability: {{ weights.get('stability_score', 'unknown') }}%
-  - Temperature: {{ weights.get('temperature_score', 'unknown') }}%
-  - Distance: {{ weights.get('distance_score', 'unknown') }}%
-  - Holiday pressure: {{ weights.get('holiday_pressure_score', 'unknown') }}%
-  - Access: {{ weights.get('access_score', 'unknown') }}%
-  - Trip efficiency: {{ weights.get('trip_efficiency_score', 'unknown') }}%
-
-  Caps:
-  {% for cap in caps %}
-  {% set cap = cap if cap is mapping else {} %}
-  - {{ cap.get('reason', 'unknown') }}: max {{ cap.get('cap', 'unknown') }}
-  {% else %}
-  - none
-  {% endfor %}
-
-  Candidate counts:
-  - Week candidates: {{ state_attr('sensor.rideradar_top_week_opportunities', 'candidate_count') | default('unknown') }}
-  - Week rejected: {{ state_attr('sensor.rideradar_top_week_opportunities', 'rejected_count') | default('unknown') }}
-  - Forecast candidates: {{ state_attr('sensor.rideradar_top_month_opportunities', 'candidate_count') | default('unknown') }}
-  - Forecast rejected: {{ state_attr('sensor.rideradar_top_month_opportunities', 'rejected_count') | default('unknown') }}
-```
-
 ## Availability Windows
 
 RideRadar evaluates every complete trip window inside the forecast horizon.
 
-Example with a 2-day trip duration and 7-day forecast horizon:
+Example with a 2-day trip duration and 8-day forecast horizon:
 
 - Monday-Tuesday
 - Tuesday-Wednesday
@@ -571,7 +512,13 @@ Summary sensors:
 
 - `sensor.rideradar_best_opportunities`
 - `sensor.rideradar_top_week_opportunities`
-- `sensor.rideradar_top_month_opportunities`
+- `sensor.rideradar_top_week_direct_opportunities`
+- `sensor.rideradar_top_week_scenic_opportunities`
+- `sensor.rideradar_top_week_trailer_opportunities` when trailer support is enabled
+- `sensor.rideradar_top_forecast_direct_opportunities`
+- `sensor.rideradar_top_forecast_scenic_opportunities`
+- `sensor.rideradar_top_forecast_trailer_opportunities` when trailer support is enabled
+- `sensor.rideradar_top_month_opportunities` legacy forecast-period summary
 - `sensor.rideradar_best_weekend_opportunity`
 - `sensor.rideradar_best_weekday_opportunity`
 - `sensor.rideradar_best_next_available_opportunity`
@@ -680,7 +627,7 @@ Useful attributes:
 - `sensor.rideradar_best_opportunities`: ranked opportunities with `decision_trace`
 - destination sensors: `exclusion_reasons`, `score_breakdown`, `tradeoffs`, `recommendation_reason`
 
-Download diagnostics from the Home Assistant device/integration diagnostics flow when filing issues. Diagnostics include active helper states, enabled destinations, exclusions, top week/month opportunities, best future windows, score breakdowns and decision traces. Start address and exact coordinates are redacted.
+Download diagnostics from the Home Assistant device/integration diagnostics flow when filing issues. Diagnostics include active helper states, enabled destinations, exclusions, top week and forecast opportunities, best future windows, score breakdowns and decision traces. Start address and exact coordinates are redacted.
 
 ## Destination Imagery
 
@@ -703,9 +650,9 @@ Initial setup uses a Home Assistant-native location flow:
 
 1. Enter a readable place or address, for example `Hardenberg, Nederland`, `Rheezerveen, Nederland`, or `Utrecht, Nederland`.
 2. RideRadar geocodes it using Open-Meteo.
-3. If one result is found, RideRadar shows a confirmation screen.
-4. If multiple results are found, choose from readable candidate locations.
-5. Confirm the resolved display name and rounded coordinates, or clear the confirmation checkbox to search again.
+3. RideRadar shows readable candidate locations in a dropdown.
+4. Select the correct result. Selecting the result is the confirmation.
+5. If the result is wrong, go back and search again with a more specific place or address.
 
 If no location is found, RideRadar keeps you in the flow and asks you to try a larger nearby town, add the country name, or use a more specific address. Invalid or partial geocoding results are not saved.
 
@@ -717,10 +664,10 @@ The options flow shows one normal settings screen with:
 - maximum route distance
 - default trip duration
 - forecast horizon days
-- trailer transport support
+- destination enablement
 - enabled destinations
 
-Dynamic scenario controls such as custom trip duration, flexible duration, weekend-only, preferred start day, travel strategy, trailer availability today, available hours per day, and maximum approach time are native dashboard entities. Coordinates are internal resolved data. They are shown for confirmation, not as the primary input method. Raw destination JSON is not part of the normal setup or options experience; import/export remains an advanced maintenance path only.
+Trailer transport support is an advanced option. Dynamic scenario controls such as custom trip duration, flexible duration, weekend-only, preferred start day, travel strategy, trailer availability today, available hours per day, and maximum approach time are native dashboard entities. Coordinates are internal resolved data. Raw destination JSON is not part of the normal setup or options experience; import/export remains an advanced maintenance path only.
 
 ## Troubleshooting
 

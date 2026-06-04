@@ -70,25 +70,14 @@ from .destinations import (
 from .geocoding import GeocodingError, LocationResult, OpenMeteoGeocodingClient
 from .models import DestinationArea, RideRadarConfigError
 
-FIELD_ACTION = "action"
 FIELD_ADDRESS = "address"
 FIELD_LOCATION = "location"
-FIELD_CONFIRM_LOCATION = "confirm_location"
 FIELD_ENABLED_DESTINATIONS = "enabled_destinations"
 FIELD_DESTINATION_NAME = "destination_name"
 FIELD_COUNTRY_REGION = "country_region"
 FIELD_ENABLED = "enabled"
 FIELD_NOTES = "notes"
 FIELD_IMPORT_EXPORT_JSON = "destinations_json"
-
-ACTION_START = "start_location"
-ACTION_MANUAL_START = "manual_start_location"
-ACTION_SETTINGS = "settings"
-ACTION_DESTINATIONS = "destinations"
-ACTION_ADD_CUSTOM = "add_custom_destination"
-ACTION_REMOVE_CUSTOM = "remove_custom_destination"
-ACTION_RESET_DEFAULTS = "reset_defaults"
-ACTION_ADVANCED = "advanced_import_export"
 
 
 class RideRadarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -116,9 +105,6 @@ class RideRadarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if results:
                     self._data[CONF_START_ADDRESS] = query
                     self._location_results = results
-                    if len(results) == 1:
-                        self._store_start_location(results[0])
-                        return await self.async_step_confirm_location()
                     return await self.async_step_choose_location()
 
         return self.async_show_form(
@@ -141,7 +127,7 @@ class RideRadarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             result = _selected_location_result(self._location_results, user_input.get(FIELD_LOCATION), errors)
             if result is not None:
                 self._store_start_location(result)
-                return await self.async_step_confirm_location()
+                return await self.async_step_settings()
         return self.async_show_form(
             step_id="choose_location",
             data_schema=vol.Schema(
@@ -155,25 +141,6 @@ class RideRadarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             ),
             errors=errors,
-        )
-
-    async def async_step_confirm_location(
-        self,
-        user_input: dict[str, Any] | None = None,
-    ) -> config_entries.ConfigFlowResult:
-        """Confirm resolved start coordinates."""
-        if user_input is not None:
-            if not bool(user_input.get(FIELD_CONFIRM_LOCATION, True)):
-                return await self.async_step_user()
-            return await self.async_step_settings()
-        return self.async_show_form(
-            step_id="confirm_location",
-            description_placeholders={
-                "address": str(self._data.get(CONF_START_ADDRESS, "")),
-                "latitude": f"{float(self._data[CONF_START_LATITUDE]):.5f}",
-                "longitude": f"{float(self._data[CONF_START_LONGITUDE]):.5f}",
-            },
-            data_schema=vol.Schema({vol.Required(FIELD_CONFIRM_LOCATION, default=True): BooleanSelector()}),
         )
 
     async def async_step_settings(
@@ -193,7 +160,10 @@ class RideRadarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_create_entry(title="RideRadar", data=self._data)
         return self.async_show_form(
             step_id="settings",
-            data_schema=_settings_schema({CONF_ENABLED_DEFAULT_DESTINATIONS: default_destination_names()}),
+            data_schema=_settings_schema(
+                {CONF_ENABLED_DEFAULT_DESTINATIONS: default_destination_names()},
+                include_trailer=False,
+            ),
             errors=errors,
         )
 
@@ -252,9 +222,6 @@ class RideRadarOptionsFlow(config_entries.OptionsFlow):
                     results = await self._geocode(query, errors, CONF_START_ADDRESS)
                     if results:
                         self._location_results = results
-                        if len(results) == 1:
-                            self._pending_destination = _start_location_options(results[0])
-                            return await self.async_step_confirm_location()
                         return await self.async_step_choose_location()
                 elif not errors:
                     return self._save_options(
@@ -280,9 +247,6 @@ class RideRadarOptionsFlow(config_entries.OptionsFlow):
                 results = await self._geocode(query, errors, CONF_START_ADDRESS)
                 if results:
                     self._location_results = results
-                    if len(results) == 1:
-                        self._pending_destination = _start_location_options(results[0])
-                        return await self.async_step_confirm_location()
                     return await self.async_step_choose_location()
         return self.async_show_form(
             step_id="start_location",
@@ -305,7 +269,7 @@ class RideRadarOptionsFlow(config_entries.OptionsFlow):
             result = _selected_location_result(self._location_results, user_input.get(FIELD_LOCATION), errors)
             if result is not None:
                 self._pending_destination = _start_location_options(result)
-                return await self.async_step_confirm_location()
+                return self._save_options({**self._pending_options, **self._pending_destination})
         return self.async_show_form(
             step_id="choose_location",
             data_schema=vol.Schema(
@@ -319,24 +283,6 @@ class RideRadarOptionsFlow(config_entries.OptionsFlow):
                 }
             ),
             errors=errors,
-        )
-
-    async def async_step_confirm_location(
-        self, user_input: dict[str, Any] | None = None
-    ) -> config_entries.ConfigFlowResult:
-        """Confirm the resolved options start location."""
-        if user_input is not None:
-            if not bool(user_input.get(FIELD_CONFIRM_LOCATION, True)):
-                return await self.async_step_start_location()
-            return self._save_options({**self._pending_options, **self._pending_destination})
-        return self.async_show_form(
-            step_id="confirm_location",
-            description_placeholders={
-                "address": str(self._pending_destination.get(CONF_START_ADDRESS, "")),
-                "latitude": f"{float(self._pending_destination[CONF_START_LATITUDE]):.5f}",
-                "longitude": f"{float(self._pending_destination[CONF_START_LONGITUDE]):.5f}",
-            },
-            data_schema=vol.Schema({vol.Required(FIELD_CONFIRM_LOCATION, default=True): BooleanSelector()}),
         )
 
     async def async_step_manual_start_location(
@@ -386,7 +332,7 @@ class RideRadarOptionsFlow(config_entries.OptionsFlow):
                 return self._save_options(_normalized_settings(user_input))
         return self.async_show_form(
             step_id="settings",
-            data_schema=_settings_schema(self._config, include_destinations=False),
+            data_schema=_settings_schema(self._config, include_destinations=False, include_trailer=True),
             errors=errors,
         )
 
@@ -596,7 +542,11 @@ class RideRadarOptionsFlow(config_entries.OptionsFlow):
         return self.async_create_entry(title="", data=options)
 
 
-def _settings_schema(defaults: dict[str, Any], include_destinations: bool = True) -> vol.Schema:
+def _settings_schema(
+    defaults: dict[str, Any],
+    include_destinations: bool = True,
+    include_trailer: bool = False,
+) -> vol.Schema:
     schema: dict[Any, Any] = {
         vol.Required(
             CONF_MAX_ROUTE_DISTANCE_KM,
@@ -629,11 +579,14 @@ def _settings_schema(defaults: dict[str, Any], include_destinations: bool = True
                 mode=SelectSelectorMode.DROPDOWN,
             )
         ),
-        vol.Required(
-            CONF_TRAILER_SUPPORT_ENABLED,
-            default=defaults.get(CONF_TRAILER_SUPPORT_ENABLED, DEFAULT_TRAILER_SUPPORT_ENABLED),
-        ): BooleanSelector(),
     }
+    if include_trailer:
+        schema[
+            vol.Required(
+                CONF_TRAILER_SUPPORT_ENABLED,
+                default=defaults.get(CONF_TRAILER_SUPPORT_ENABLED, DEFAULT_TRAILER_SUPPORT_ENABLED),
+            )
+        ] = BooleanSelector()
     if include_destinations:
         schema[
             vol.Required(
@@ -652,7 +605,7 @@ def _settings_schema(defaults: dict[str, Any], include_destinations: bool = True
 
 
 def _normal_options_schema(defaults: dict[str, Any]) -> vol.Schema:
-    schema = dict(_settings_schema(defaults, include_destinations=False).schema)
+    schema = dict(_settings_schema(defaults, include_destinations=False, include_trailer=False).schema)
     return vol.Schema(
         {
             vol.Required(CONF_START_ADDRESS, default=defaults.get(CONF_START_ADDRESS, "")): TextSelector(
@@ -741,7 +694,9 @@ def _normalized_settings(data: dict[str, Any]) -> dict[str, Any]:
         ),
         CONF_ACTIVITY_PROFILE: str(data.get(CONF_ACTIVITY_PROFILE, DEFAULT_ACTIVITY_PROFILE)),
         CONF_DETOUR_FACTOR: float(data.get(CONF_DETOUR_FACTOR, DEFAULT_DETOUR_FACTOR)),
-        CONF_TRAILER_SUPPORT_ENABLED: bool(data[CONF_TRAILER_SUPPORT_ENABLED]),
+        CONF_TRAILER_SUPPORT_ENABLED: bool(
+            data.get(CONF_TRAILER_SUPPORT_ENABLED, DEFAULT_TRAILER_SUPPORT_ENABLED)
+        ),
     }
 
 

@@ -15,7 +15,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import slugify
 
-from .const import ATTRIBUTION, DOMAIN, MANUFACTURER
+from .const import ATTRIBUTION, CONF_TRAILER_SUPPORT_ENABLED, DOMAIN, MANUFACTURER
 from .coordinator import RideRadarDataCoordinator
 from .destinations import destinations_from_config
 from .models import DestinationResult
@@ -195,6 +195,7 @@ async def async_setup_entry(
                 "best_below_threshold": data.get("top_month_best_below_threshold"),
             },
         ),
+        *_strategy_top_sensors(entry, coordinator),
         RideRadarSensor(
             entry,
             coordinator,
@@ -244,6 +245,32 @@ async def async_setup_entry(
         entities.append(RideRadarDestinationSensor(entry, coordinator, destination.name))
         entities.append(RideRadarDestinationFutureWindowSensor(entry, coordinator, destination.name))
     async_add_entities(entities)
+
+
+def _strategy_top_sensors(entry: ConfigEntry, coordinator: RideRadarDataCoordinator) -> list[SensorEntity]:
+    descriptions = [
+        ("top_week_direct_opportunities", "Top Week Direct Opportunities", "mdi:highway"),
+        ("top_week_scenic_opportunities", "Top Week Scenic Opportunities", "mdi:map-marker-path"),
+        ("top_forecast_direct_opportunities", "Top Forecast Direct Opportunities", "mdi:highway"),
+        ("top_forecast_scenic_opportunities", "Top Forecast Scenic Opportunities", "mdi:map-marker-path"),
+    ]
+    if coordinator.config.get(CONF_TRAILER_SUPPORT_ENABLED):
+        descriptions.extend(
+            [
+                ("top_week_trailer_opportunities", "Top Week Trailer Opportunities", "mdi:trailer"),
+                ("top_forecast_trailer_opportunities", "Top Forecast Trailer Opportunities", "mdi:trailer"),
+            ]
+        )
+    return [
+        RideRadarSensor(
+            entry,
+            coordinator,
+            SensorEntityDescription(key=key, name=name, icon=icon),
+            lambda data, data_key=key: _strategy_top_summary(data.get(data_key)),
+            lambda data, data_key=key: data.get(data_key, {}),
+        )
+        for key, name, icon in descriptions
+    ]
 
 
 class RideRadarSensor(CoordinatorEntity[RideRadarDataCoordinator], SensorEntity):
@@ -684,6 +711,12 @@ def _top_opportunity_summary(value: object) -> str | None:
     return " | ".join(
         f"{index}. {_single_opportunity_summary(opportunity)}" for index, opportunity in enumerate(value[:3], start=1)
     )
+
+
+def _strategy_top_summary(value: object) -> str:
+    if not isinstance(value, dict):
+        return "Geen kansen boven 70 gevonden"
+    return _top_opportunity_summary(value.get("opportunities")) or "Geen kansen boven 70 gevonden"
 
 
 def _best_decision_trace(data: dict[str, object]) -> dict[str, Any] | None:

@@ -102,6 +102,15 @@ ALL_OPPORTUNITIES_MIN_SCORE = 60
 ALL_OPPORTUNITIES_ATTRIBUTE_LIMIT = 100
 ALL_OPPORTUNITIES_DEFAULT_MIN_DURATION = 2
 ALL_OPPORTUNITIES_DEFAULT_MAX_DURATION = 4
+COMING_WEEK_DAYS = 8
+TOP_STRATEGY_OPPORTUNITY_KEYS = (
+    ("top_week_direct_opportunities", TRAVEL_STRATEGY_MOTORCYCLE_DIRECT, COMING_WEEK_DAYS),
+    ("top_week_scenic_opportunities", TRAVEL_STRATEGY_MOTORCYCLE_SCENIC, COMING_WEEK_DAYS),
+    ("top_week_trailer_opportunities", TRAVEL_STRATEGY_TRAILER, COMING_WEEK_DAYS),
+    ("top_forecast_direct_opportunities", TRAVEL_STRATEGY_MOTORCYCLE_DIRECT, None),
+    ("top_forecast_scenic_opportunities", TRAVEL_STRATEGY_MOTORCYCLE_SCENIC, None),
+    ("top_forecast_trailer_opportunities", TRAVEL_STRATEGY_TRAILER, None),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,6 +220,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             "all_opportunities_attribute_limit": ALL_OPPORTUNITIES_ATTRIBUTE_LIMIT,
             "top_week_opportunities": [],
             "top_month_opportunities": [],
+            **_empty_strategy_top_data(),
             "top_week_candidate_count": 0,
             "top_week_rejected_count": 0,
             "top_week_best_below_threshold": None,
@@ -274,6 +284,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 "all_opportunities_attribute_limit": ALL_OPPORTUNITIES_ATTRIBUTE_LIMIT,
                 "top_week_opportunities": [],
                 "top_month_opportunities": [],
+                **_empty_strategy_top_data(),
                 "top_week_candidate_count": 0,
                 "top_week_rejected_count": 0,
                 "top_week_best_below_threshold": None,
@@ -359,9 +370,10 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             )
         )
         visible_all_opportunities = _table_opportunities(all_opportunities)
-        top_week = _top_opportunities(opportunities, max_days_until=7)
+        strategy_top_opportunities = _strategy_top_opportunity_data(all_opportunities)
+        top_week = _top_opportunities(opportunities, max_days_until=COMING_WEEK_DAYS)
         top_month = _top_opportunities(opportunities)
-        top_week_stats = _top_opportunity_stats(opportunities, max_days_until=7)
+        top_week_stats = _top_opportunity_stats(opportunities, max_days_until=COMING_WEEK_DAYS)
         top_month_stats = _top_opportunity_stats(opportunities)
         excluded_destinations = _excluded_destinations(results) + disabled_destinations
         if LOGGER.isEnabledFor(logging.DEBUG):
@@ -385,6 +397,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             "all_opportunities_attribute_limit": ALL_OPPORTUNITIES_ATTRIBUTE_LIMIT,
             "top_week_opportunities": top_week,
             "top_month_opportunities": top_month,
+            **strategy_top_opportunities,
             "top_week_candidate_count": top_week_stats["candidate_count"],
             "top_week_rejected_count": top_week_stats["rejected_count"],
             "top_week_best_below_threshold": top_week_stats["best_below_threshold"],
@@ -849,6 +862,92 @@ def _top_opportunities(
         )
     ]
     return top[:limit]
+
+
+def _empty_strategy_top_data() -> dict[str, dict[str, Any]]:
+    return {
+        key: {
+            "opportunities": [],
+            "candidate_count": 0,
+            "rejected_count": 0,
+            "best_rejected_candidate": None,
+        }
+        for key, _, _ in TOP_STRATEGY_OPPORTUNITY_KEYS
+    }
+
+
+def _strategy_top_opportunity_data(opportunities: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {
+        key: _strategy_top_opportunities(
+            opportunities,
+            strategy=strategy,
+            max_days_until=max_days_until,
+        )
+        for key, strategy, max_days_until in TOP_STRATEGY_OPPORTUNITY_KEYS
+    }
+
+
+def _strategy_top_opportunities(
+    opportunities: list[dict[str, Any]],
+    strategy: str,
+    max_days_until: int | None = None,
+    minimum_score: int = 70,
+    limit: int = 3,
+) -> dict[str, Any]:
+    candidates = [
+        opportunity
+        for opportunity in opportunities
+        if opportunity.get("strategy") == strategy
+        and (
+            max_days_until is None
+            or (opportunity.get("days_until") is not None and opportunity["days_until"] <= max_days_until)
+        )
+    ]
+    accepted = [
+        _compact_strategy_opportunity(opportunity)
+        for opportunity in candidates
+        if int(opportunity["ride_quality_score"]) >= minimum_score
+    ][:limit]
+    rejected = [opportunity for opportunity in candidates if int(opportunity["ride_quality_score"]) < minimum_score]
+    return {
+        "opportunities": accepted,
+        "candidate_count": len(candidates),
+        "rejected_count": len(rejected),
+        "best_rejected_candidate": _strategy_rejection_summary(rejected[0]) if rejected else None,
+    }
+
+
+def _compact_strategy_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "destination": opportunity["destination"],
+        "ride_quality_score": opportunity["ride_quality_score"],
+        "score": opportunity["ride_quality_score"],
+        "period": opportunity["period"],
+        "duration_days": opportunity["duration_days"],
+        "strategy": opportunity["strategy"],
+        "strategy_label": opportunity["strategy_label"],
+        "weather_score": opportunity["weather_score"],
+        "stability_score": opportunity["stability_score"],
+        "trip_efficiency_score": opportunity["trip_efficiency_score"],
+        "distance_score": opportunity["distance_score"],
+        "main_reason": opportunity["main_reason"],
+        "main_tradeoff": opportunity["main_tradeoff"],
+    }
+
+
+def _strategy_rejection_summary(opportunity: dict[str, Any] | None) -> dict[str, Any] | None:
+    if opportunity is None:
+        return None
+    return {
+        "destination": opportunity["destination"],
+        "ride_quality_score": opportunity["ride_quality_score"],
+        "period": opportunity["period"],
+        "duration_days": opportunity["duration_days"],
+        "strategy": opportunity["strategy"],
+        "strategy_label": opportunity["strategy_label"],
+        "main_reason": opportunity["main_reason"],
+        "main_tradeoff": opportunity["main_tradeoff"],
+    }
 
 
 def _top_opportunity_stats(

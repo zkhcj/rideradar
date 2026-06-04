@@ -138,3 +138,86 @@ async def test_all_opportunities_sensor_exists(hass) -> None:
     sensor = next(entity for entity in entities if entity.unique_id.endswith("_all_opportunities"))
     assert sensor.native_value == len(coordinator.data["all_opportunities"])
     assert sensor.extra_state_attributes["opportunities"] == coordinator.data["all_opportunities"]
+
+
+async def test_strategy_top_opportunity_groups_use_shared_payload(hass) -> None:
+    coordinator = RideRadarDataCoordinator(hass, _entry(), FakeApiClient(), FakeRoutingClient())
+    coordinator.set_runtime_control("trip_duration_days", "4")
+
+    data = await coordinator._async_update_data()
+    direct = data["top_week_direct_opportunities"]
+    scenic = data["top_forecast_scenic_opportunities"]
+
+    assert direct["opportunities"]
+    assert scenic["opportunities"]
+    assert all(item["strategy"] == "motorcycle_direct" for item in direct["opportunities"])
+    assert all(item["strategy"] == "motorcycle_scenic" for item in scenic["opportunities"])
+    assert all(item["ride_quality_score"] >= 70 for item in direct["opportunities"])
+    for field in (
+        "destination",
+        "ride_quality_score",
+        "period",
+        "duration_days",
+        "strategy",
+        "strategy_label",
+        "weather_score",
+        "stability_score",
+        "trip_efficiency_score",
+        "distance_score",
+        "main_reason",
+        "main_tradeoff",
+    ):
+        assert field in direct["opportunities"][0]
+
+
+async def test_strategy_week_window_uses_coming_8_days(hass) -> None:
+    coordinator = RideRadarDataCoordinator(hass, _entry(), FakeApiClient(), FakeRoutingClient())
+
+    data = await coordinator._async_update_data()
+
+    assert data["top_week_direct_opportunities"]["candidate_count"] == data[
+        "top_forecast_direct_opportunities"
+    ]["candidate_count"]
+
+
+async def test_strategy_top_rejected_candidate_when_no_70_plus(hass) -> None:
+    class PoorApiClient:
+        async def get_daily_forecast(self, latitude, longitude, forecast_days):
+            return [
+                DailyForecast("2026-06-04", 8, 100, 12, 55, 75, 95, 95),
+                DailyForecast("2026-06-05", 8, 100, 12, 55, 75, 95, 95),
+                DailyForecast("2026-06-06", 8, 100, 12, 55, 75, 95, 95),
+                DailyForecast("2026-06-07", 8, 100, 12, 55, 75, 95, 95),
+            ][:forecast_days]
+
+    coordinator = RideRadarDataCoordinator(hass, _entry(), PoorApiClient(), FakeRoutingClient())
+    coordinator.set_runtime_control("trip_duration_days", "4")
+
+    data = await coordinator._async_update_data()
+    group = data["top_week_direct_opportunities"]
+
+    assert group["opportunities"] == []
+    assert group["best_rejected_candidate"] is not None
+    assert group["best_rejected_candidate"]["ride_quality_score"] < 70
+
+
+async def test_strategy_trailer_sensors_only_created_when_enabled(hass) -> None:
+    disabled_entry = _entry(trailer_support_enabled=False)
+    disabled_coordinator = RideRadarDataCoordinator(hass, disabled_entry, FakeApiClient(), FakeRoutingClient())
+    disabled_coordinator.data = await disabled_coordinator._async_update_data()
+    hass.data[DOMAIN] = {disabled_entry.entry_id: disabled_coordinator}
+    disabled_entities = []
+
+    await async_setup_sensor(hass, disabled_entry, disabled_entities.extend)
+
+    assert not any(entity.unique_id.endswith("_top_week_trailer_opportunities") for entity in disabled_entities)
+
+    enabled_entry = _entry(trailer_support_enabled=True)
+    enabled_coordinator = RideRadarDataCoordinator(hass, enabled_entry, FakeApiClient(), FakeRoutingClient())
+    enabled_coordinator.data = await enabled_coordinator._async_update_data()
+    hass.data[DOMAIN] = {enabled_entry.entry_id: enabled_coordinator}
+    enabled_entities = []
+
+    await async_setup_sensor(hass, enabled_entry, enabled_entities.extend)
+
+    assert any(entity.unique_id.endswith("_top_week_trailer_opportunities") for entity in enabled_entities)

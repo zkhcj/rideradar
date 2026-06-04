@@ -28,6 +28,12 @@ def test_default_dashboard_uses_native_entities_and_literal_markdown_tables() ->
     readme = README.read_text(encoding="utf-8")
 
     for entity_id in (
+        "sensor.rideradar_top_week_direct_opportunities",
+        "sensor.rideradar_top_week_scenic_opportunities",
+        "sensor.rideradar_top_week_trailer_opportunities",
+        "sensor.rideradar_top_forecast_direct_opportunities",
+        "sensor.rideradar_top_forecast_scenic_opportunities",
+        "sensor.rideradar_top_forecast_trailer_opportunities",
         "select.rideradar_trip_duration",
         "number.rideradar_trip_duration_days",
         "number.rideradar_forecast_horizon_days",
@@ -41,8 +47,9 @@ def test_default_dashboard_uses_native_entities_and_literal_markdown_tables() ->
     ):
         assert entity_id in readme
 
-    assert "content: |\n          {% set windows = state_attr('sensor.rideradar_best_opportunities'" in readme
-    assert "| # | Bestemming | Score | Weer | Efficiëntie | Periode |" in readme
+    assert "Coming 8 dagen - direct" in readme
+    assert "Forecast - binnendoor" in readme
+    assert "| # | Bestemming | Score | Dagen | Periode |" in readme
     assert "Aanhanger vandaag beschikbaar" in readme
     assert "type: custom:flex-table-card" in readme
     assert "opportunities.score" in readme

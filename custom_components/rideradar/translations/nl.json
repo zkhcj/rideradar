@@ -3,33 +3,25 @@
     "step": {
       "user": {
         "title": "RideRadar startlocatie",
-        "description": "Zoek de plek waar je ritten meestal starten. Gebruik een stad, dorp, adres of herkenningspunt. Voorbeelden: `Brussel`, `Luxemburg Stad`, `Aachen Hbf`, `Markt Maastricht`. RideRadar toont het gevonden adres en de coordinaten voordat dit wordt opgeslagen.",
+        "description": "Zoek de plek waar je ritten meestal starten. Gebruik een stad, dorp, adres of herkenningspunt. Voorbeelden: `Brussel`, `Luxemburg Stad`, `Aachen Hbf`, `Markt Maastricht`. RideRadar toont gevonden locaties in een lijst.",
         "data": {
           "start_address": "Startadres of plaats"
         }
       },
       "choose_location": {
         "title": "Kies startlocatie",
-        "description": "Er zijn meerdere locaties gevonden. Kies de plek die RideRadar als startpunt moet gebruiken.",
+        "description": "Kies de plek die RideRadar als startpunt moet gebruiken. De selectie wordt direct gebruikt.",
         "data": {
           "location": "Gevonden locatie"
         }
       },
-      "confirm_location": {
-        "title": "Bevestig startlocatie",
-        "description": "RideRadar heeft **{address}** gevonden. Coordinaten: **{latitude}**, **{longitude}**. Ga alleen door als dit het juiste startpunt is. Zet het vinkje uit om opnieuw te zoeken.",
-        "data": {
-          "confirm_location": "Dit is de juiste startlocatie"
-        }
-      },
       "settings": {
         "title": "RideRadar ritinstellingen",
-        "description": "Kies verstandige standaardwaarden voor bereik, voorspelling, aanhangerondersteuning en bestemmingsgebieden. Dynamische planning pas je later direct aan op het dashboard.",
+        "description": "Kies verstandige standaardwaarden voor bereik, voorspelling en bestemmingsgebieden. Dynamische planning pas je later direct aan op het dashboard.",
         "data": {
           "max_route_distance_km": "Maximale routeafstand",
           "forecast_days": "Voorspellingshorizon in dagen",
           "preferred_trip_duration": "Standaard ritduur",
-          "trailer_support_enabled": "Aanhangertransport inschakelen",
           "enabled_default_destinations": "Ingeschakelde standaardbestemmingen"
         }
       }
@@ -54,43 +46,32 @@
     "step": {
       "init": {
         "title": "RideRadar instellingen",
-        "description": "Huidige startlocatie: **{address}**. Coordinaten: **{latitude}**, **{longitude}**. Wijzig het adres of de plaatsnaam om een nieuw startpunt te zoeken; coordinaten worden alleen ter bevestiging getoond.",
+        "description": "Huidige startlocatie: **{address}**. Coordinaten: **{latitude}**, **{longitude}**. Wijzig het adres of de plaatsnaam om een nieuw startpunt te zoeken.",
         "data": {
           "start_address": "Startadres of plaats",
           "max_route_distance_km": "Maximale routeafstand",
           "forecast_days": "Voorspellingshorizon in dagen",
           "preferred_trip_duration": "Gewenste reisduur",
-          "custom_trip_duration_days": "Aangepaste reisduur",
-          "activity_profile": "Activiteitsprofiel",
-          "detour_factor": "Omwegfactor voor fallback-route",
-          "trailer_support_enabled": "Trailertransportstrategie inschakelen",
           "enabled_destinations": "Ingeschakelde bestemmingen"
         }
       },
       "start_location": {
         "title": "Startlocatie wijzigen",
-        "description": "Zoek een nieuw startpunt. Voorbeelden: `Brussel`, `Luxemburg Stad`, `Aachen Hbf`, `Markt Maastricht`. RideRadar toont het gevonden adres en de coordinaten voordat dit wordt opgeslagen.",
+        "description": "Zoek een nieuw startpunt. Voorbeelden: `Brussel`, `Luxemburg Stad`, `Aachen Hbf`, `Markt Maastricht`. RideRadar toont gevonden locaties in een lijst.",
         "data": {
           "start_address": "Startadres of plaats"
         }
       },
       "choose_location": {
         "title": "Kies startlocatie",
-        "description": "Er zijn meerdere locaties gevonden. Kies de plek die RideRadar als startpunt moet gebruiken.",
+        "description": "Kies de plek die RideRadar als startpunt moet gebruiken. De selectie wordt direct gebruikt.",
         "data": {
           "location": "Gevonden locatie"
         }
       },
-      "confirm_location": {
-        "title": "Bevestig startlocatie",
-        "description": "RideRadar heeft **{address}** gevonden. Coordinaten: **{latitude}**, **{longitude}**. Ga alleen door als dit het juiste startpunt is. Zet het vinkje uit om opnieuw te zoeken.",
-        "data": {
-          "confirm_location": "Dit is de juiste startlocatie"
-        }
-      },
       "manual_start_location": {
         "title": "Handmatige startcoordinaten",
-        "description": "Alleen als geavanceerde fallback. Zoek bij voorkeur eerst op plaatsnaam zodat RideRadar het gevonden adres kan bevestigen.",
+        "description": "Alleen als geavanceerde fallback. Zoek bij voorkeur eerst op plaatsnaam zodat RideRadar een leesbaar adres kan vinden.",
         "data": {
           "start_address": "Locatielabel",
           "start_latitude": "Startbreedtegraad",
@@ -98,8 +79,8 @@
         }
       },
       "settings": {
-        "title": "Ritinstellingen",
-        "description": "Wijzig standaard bereik, voorspelling, ritduur en aanhangerondersteuning. Scenario-instellingen zoals alleen weekend, reisstrategie, custom dagen, beschikbare tijd en maximale aanrijtijd zijn native dashboardcontrols.",
+        "title": "Geavanceerde ritinstellingen",
+        "description": "Wijzig geavanceerde standaardwaarden, inclusief aanhangertransport. Alleen inschakelen als je echt een auto en aanhanger gebruikt om de motor te vervoeren.",
         "data": {
           "max_route_distance_km": "Maximale routeafstand",
           "forecast_days": "Voorspellingshorizon in dagen",
