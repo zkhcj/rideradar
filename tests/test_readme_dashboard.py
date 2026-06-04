@@ -47,9 +47,15 @@ def test_default_dashboard_uses_native_entities_and_literal_markdown_tables() ->
     ):
         assert entity_id in readme
 
-    assert "Coming 8 dagen - direct" in readme
-    assert "Forecast - binnendoor" in readme
-    assert "| # | Bestemming | Score | Dagen | Periode |" in readme
+    assert "Deze week - direct" in readme
+    assert "Deze week - binnendoor" in readme
+    assert "Deze maand - direct" in readme
+    assert "Deze maand - binnendoor" in readme
+    assert "Beschikbare vensters" in readme
+    assert "Coming 8 dagen" not in readme
+    assert "Forecast - direct" not in readme
+    assert "Forecast - binnendoor" not in readme
+    assert "| Bestemming | Strategie | Score | Dagen | Periode | Aandachtspunt |" in readme
     assert "Aanhanger vandaag beschikbaar" in readme
     assert "type: custom:flex-table-card" in readme
     assert "opportunities.score" in readme

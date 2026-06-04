@@ -349,7 +349,7 @@ def calculate_ride_experience(
         holiday_names=holiday_names,
         access_notes=access_notes,
         access_warnings=[] if access_score >= 80 else access_notes,
-        known_restrictions=[] if "no major motorcycle restrictions" in access_notes[0] else access_notes,
+        known_restrictions=[] if "geen grote motorbeperkingen" in access_notes[0] else access_notes,
         exclusion_reasons=list(trip_efficiency["exclusion_reasons"]),
         explanation=explanation,
     )
@@ -570,13 +570,13 @@ def _motorcycle_access(destination: DestinationArea, dates: list[date], base_sco
     penalty = 0
     if _contains_weekend(dates) and any(area in name for area in ("eifel", "zwarte woud", "vogezen", "harz")):
         penalty += 12
-        notes.append("weekend motorcycle restrictions are possible on popular noise-sensitive routes")
+        notes.append("weekendbeperkingen voor motoren zijn mogelijk op populaire geluidsgevoelige routes")
     if any(day.month in {6, 7, 8, 9} for day in dates) and any(area in name for area in ("dolomieten", "vogezen")):
         penalty += 10
-        notes.append("seasonal mountain or tourism restrictions may affect some roads")
+        notes.append("seizoens- of toerismebeperkingen kunnen sommige wegen raken")
     score = _clamp_score(base_score - penalty)
     if not notes:
-        notes.append("no major motorcycle restrictions are known for this destination profile")
+        notes.append("geen grote motorbeperkingen bekend voor dit bestemmingsprofiel")
     return score, notes
 
 
@@ -621,37 +621,37 @@ def _experience_explanation(
     score_components: dict[str, int],
     recommendation_type: str,
 ) -> str:
-    parts = [f"Ride quality is {ride_quality_score}/100."]
+    parts = [f"Ritkwaliteit is {ride_quality_score}/100."]
     if recommendation_type == "least_bad_option":
-        parts.append("No strong ride was found; this is the least compromised option within the current settings.")
+        parts.append("Er is geen sterke rit gevonden; dit is de minst slechte optie binnen de huidige instellingen.")
     if score_components["weather_score"] == 0:
         parts.append(
-            "This ride scores low because the weather score is 0/100; rain, cold, wind or unstable weather is expected."
+            "Deze rit scoort laag omdat de weerscore 0/100 is; regen, kou, wind of onstabiel weer wordt verwacht."
         )
     elif score_components["weather_score"] < 25:
-        parts.append("Weather is poor enough to cap the final recommendation score.")
+        parts.append("Het weer is slecht genoeg om de eindscore te begrenzen.")
     if score_components["stability_score"] == 0:
-        parts.append("Forecast stability is 0/100, so the complete window is unreliable.")
+        parts.append("Weerstabiliteit is 0/100; het volledige ritvenster is onbetrouwbaar.")
     if exclusion_reasons:
-        parts.append("This option is excluded because " + "; ".join(exclusion_reasons) + ".")
+        parts.append("Deze optie is uitgesloten door: " + "; ".join(exclusion_reasons) + ".")
     if traffic_score >= 80:
-        parts.append("Traffic pressure is expected to stay low.")
+        parts.append("Verkeersdruk blijft naar verwachting laag.")
     elif traffic_score >= 60:
-        parts.append("Traffic pressure is moderate and may affect busier roads.")
+        parts.append("Verkeersdruk is matig en kan drukkere wegen raken.")
     else:
-        parts.append("Traffic pressure is high enough to reduce ride quality.")
+        parts.append("Verkeersdruk is hoog genoeg om de ritkwaliteit te verlagen.")
     if holiday_names:
-        parts.append(f"Holiday pressure is elevated around {', '.join(holiday_names)}.")
+        parts.append(f"Vakantiedruk is verhoogd rond {', '.join(holiday_names)}.")
     if tourism_score < 65:
-        parts.append("Tourism pressure may make scenic routes busier than usual.")
+        parts.append("Toerismedruk kan mooie routes drukker maken dan normaal.")
     if trip_efficiency_score >= 80:
-        parts.append("Travel effort leaves enough usable destination riding time.")
+        parts.append("De reisaanpak laat genoeg bruikbare rijtijd op de bestemming over.")
     elif trip_efficiency_score >= 60:
-        parts.append("Travel effort is acceptable but reduces destination riding time.")
+        parts.append("De reisaanpak is acceptabel, maar vermindert de rijtijd op de bestemming.")
     else:
-        parts.append("Travel effort leaves too little useful destination riding time for this trip type.")
+        parts.append("De reisaanpak laat te weinig bruikbare rijtijd over voor dit type rit.")
     if access_score < 80:
-        parts.append("Motorcycle access is partially constrained by known regional restriction risk.")
+        parts.append("Motortoegang wordt deels beperkt door bekende regionale restrictierisico's.")
     else:
         parts.append(access_notes[0])
     return " ".join(parts)

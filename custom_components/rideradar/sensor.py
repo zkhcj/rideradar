@@ -758,7 +758,7 @@ def _format_period(start_value: object, end_value: object) -> str:
     end = _format_date(end_value)
     if start and end:
         return f"{start} t/m {end}"
-    return start or end or "unknown period"
+    return start or end or "Periode onbekend"
 
 
 def _score_breakdown_attributes(result: DestinationResult) -> dict[str, int | None] | None:
@@ -790,17 +790,17 @@ def _recommendation_reason(result: DestinationResult) -> str | None:
 
 def _window_recommendation_reason(destination: str, experience: Any, window: Any) -> str:
     if experience.ride_quality_score >= 85:
-        quality = "wins because it is dry, stable and practical"
+        quality = "wint omdat het droog, stabiel en praktisch is"
     elif experience.ride_quality_score >= 70:
-        quality = "wins because it has the best balance of weather and trip practicality"
+        quality = "wint door de beste balans tussen weer en praktische ritkwaliteit"
     else:
-        quality = "is the least compromised option in the current forecast"
+        quality = "is de minst slechte optie binnen de huidige weersverwachting"
     return (
-        f"{destination} {quality}: weather {experience.weather_score}/100, stability "
-        f"{window.weather_stability_score}/100, temperature {experience.temperature_score}/100, "
-        f"distance {experience.distance_score}/100, holiday pressure "
-        f"{experience.holiday_pressure_score}/100, access {experience.access_score}/100, "
-        f"trip efficiency {experience.trip_efficiency_score}/100."
+        f"{destination} {quality}: weer {experience.weather_score}/100, stabiliteit "
+        f"{window.weather_stability_score}/100, temperatuur {experience.temperature_score}/100, "
+        f"afstand {experience.distance_score}/100, vakantiedruk "
+        f"{experience.holiday_pressure_score}/100, toegang {experience.access_score}/100, "
+        f"ritefficientie {experience.trip_efficiency_score}/100."
     )
 
 
@@ -813,20 +813,20 @@ def _tradeoffs(result: DestinationResult) -> list[str]:
 def _window_tradeoffs(experience: Any, window: Any) -> list[str]:
     tradeoffs: list[str] = []
     if experience.weather_score < 80:
-        tradeoffs.append(f"Weather score is {experience.weather_score}/100.")
+        tradeoffs.append(f"Weer scoort {experience.weather_score}/100.")
     if window.weather_stability_score < 80:
-        tradeoffs.append(f"Stability score is {window.weather_stability_score}/100.")
+        tradeoffs.append(f"Weerstabiliteit scoort {window.weather_stability_score}/100.")
     if experience.temperature_score < 80:
-        tradeoffs.append(f"Temperature score is {experience.temperature_score}/100.")
+        tradeoffs.append(f"Temperatuur scoort {experience.temperature_score}/100.")
     if experience.distance_score < 80:
-        tradeoffs.append(f"Distance score is {experience.distance_score}/100.")
+        tradeoffs.append(f"Afstand scoort {experience.distance_score}/100.")
     if experience.trip_efficiency_score < 80:
-        tradeoffs.append(f"Trip efficiency score is {experience.trip_efficiency_score}/100.")
+        tradeoffs.append(f"Ritefficientie scoort {experience.trip_efficiency_score}/100.")
     if experience.holiday_pressure_score < 80:
-        tradeoffs.append(f"Holiday pressure score is {experience.holiday_pressure_score}/100.")
+        tradeoffs.append(f"Vakantiedruk scoort {experience.holiday_pressure_score}/100.")
     if experience.access_score < 80:
-        tradeoffs.append(f"Access score is {experience.access_score}/100.")
-    return tradeoffs or ["No major trade-offs detected."]
+        tradeoffs.append(f"Toegang scoort {experience.access_score}/100.")
+    return tradeoffs or ["Geen grote trade-off gevonden."]
 
 
 def _weekday_label(value: date) -> str:

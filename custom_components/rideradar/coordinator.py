@@ -461,16 +461,16 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 best_start_day=None,
                 trip_duration=trip_duration.max_days,
                 weather_stability_score=None,
-                stability_explanation="No complete trip window is available.",
+                stability_explanation="Er is geen volledig ritvenster beschikbaar.",
                 daily_scores={},
                 trip_score_breakdown=None,
-                trip_explanation="Outside configured range.",
+                trip_explanation="Buiten ingestelde afstand.",
                 ride_quality_score=None,
                 ride_experience=None,
                 all_trip_windows=[],
                 reachable=False,
                 available=True,
-                explanation=f"Outside configured range ({route.distance_km:.0f} km)",
+                explanation=f"Deze bestemming ligt buiten de ingestelde maximale afstand ({route.distance_km:.0f} km).",
                 exclusion_reasons=["too_far"],
             )
 
@@ -531,7 +531,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             weather_stability_score=best_trip_window.weather_stability_score if best_trip_window else None,
             stability_explanation=best_trip_window.stability_explanation
             if best_trip_window
-            else "No complete trip window is available.",
+            else "Er is geen volledig ritvenster beschikbaar.",
             daily_scores={date: score.score for date, score in scores.items()},
             trip_score_breakdown=best_trip_window.trip_score_breakdown if best_trip_window else None,
             trip_explanation=trip_explanation,
@@ -547,7 +547,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
 def _summary(best: DestinationResult | None) -> str:
     if best is None:
-        return "No reachable destination with forecast data"
+        return "Geen bereikbare bestemming met beschikbare weersverwachting."
     period = (
         _format_period(best.best_trip_window.start_day, best.best_trip_window.end_day)
         if best.best_trip_window
@@ -994,10 +994,10 @@ def _primary_rejection_reason(opportunity: dict[str, Any]) -> str:
 def _primary_rejection_detail(opportunity: dict[str, Any]) -> str:
     reason = _primary_rejection_reason(opportunity)
     if reason == "weather_too_poor":
-        return f"Weather score is {opportunity['weather_score']}/100."
+        return f"Weer scoort {opportunity['weather_score']}/100."
     if reason == "stability_too_low":
-        return f"Stability score is {opportunity['stability_score']}/100."
-    return f"Ride quality score is {opportunity['ride_quality_score']}/100, below the 70 threshold."
+        return f"Weerstabiliteit scoort {opportunity['stability_score']}/100."
+    return f"Ritkwaliteit scoort {opportunity['ride_quality_score']}/100 en blijft onder de adviesdrempel van 70."
 
 
 def _disabled_destinations(config: dict[str, Any]) -> list[dict[str, str]]:
@@ -1006,7 +1006,7 @@ def _disabled_destinations(config: dict[str, Any]) -> list[dict[str, str]]:
         {
             "destination": destination.name,
             "reason": "disabled",
-            "details": "Destination is disabled in RideRadar options.",
+            "details": "Deze bestemming staat uit in de RideRadar-instellingen.",
         }
         for destination in all_destinations_for_options(config)
         if destination.name not in enabled_names
@@ -1067,14 +1067,16 @@ def _canonical_exclusion_reason(reason: str) -> str:
 def _exclusion_details(reason: str, result: DestinationResult) -> str:
     details = {
         "too_far": result.explanation,
-        "no_forecast_data": "No forecast data was returned for this destination.",
-        "no_complete_window": "No complete weather window matches the selected duration.",
-        "weekend_only_filter": "No evaluated window matched the weekend-only filter.",
-        "preferred_start_day_filter": "No evaluated window matched the preferred start day.",
-        "trailer_required_but_unavailable": "Trailer strategy is selected, but the trailer availability helper is off.",
-        "trailer_disabled": "Trailer transport is selected, but trailer support is disabled in RideRadar options.",
-        "approach_time_too_high": "Approach time exceeds the configured maximum travel effort.",
-        "insufficient_destination_ride_time": "Too little useful destination riding time remains for this trip type.",
+        "no_forecast_data": "Voor deze bestemming is geen bruikbare weersverwachting beschikbaar.",
+        "no_complete_window": "Er is geen volledig weervenster voor de geselecteerde ritduur.",
+        "weekend_only_filter": "Geen beoordeeld venster past binnen de weekendfilter.",
+        "preferred_start_day_filter": "Geen beoordeeld venster start op de voorkeursdag.",
+        "trailer_required_but_unavailable": (
+            "Aanhangertransport is gekozen, maar de aanhanger is vandaag niet beschikbaar."
+        ),
+        "trailer_disabled": "Aanhangertransport staat uit in de RideRadar-instellingen.",
+        "approach_time_too_high": "De aanrijtijd is hoger dan de ingestelde maximale reistijd.",
+        "insufficient_destination_ride_time": "Er blijft te weinig bruikbare rijtijd over op de bestemming.",
     }
     return details.get(reason, result.explanation)
 
@@ -1682,7 +1684,7 @@ def _format_period(start_value: str | None, end_value: str | None) -> str:
     end = _format_date(end_value)
     if start and end:
         return f"{start} t/m {end}"
-    return start or end or "unknown period"
+    return start or end or "Periode onbekend"
 
 
 def _score_breakdown(experience: Any, window: Any) -> dict[str, int]:
@@ -1700,42 +1702,43 @@ def _score_breakdown(experience: Any, window: Any) -> dict[str, int]:
 
 def _recommendation_reason(destination: str, experience: Any, window: Any) -> str:
     if experience.ride_quality_score < 70:
-        quality = "least compromised option, not a strong recommendation"
+        quality = "minst slechte optie, geen sterke aanbeveling"
     elif experience.ride_quality_score >= 85:
-        quality = "strongest complete trip window"
+        quality = "sterkste volledige ritvenster"
     elif experience.ride_quality_score >= 70:
-        quality = "best balanced available window"
+        quality = "best gebalanceerde beschikbare ritvenster"
     else:
-        quality = "least compromised available window"
+        quality = "minst slechte beschikbare ritvenster"
     return (
-        f"{destination} is the {quality}: weather {experience.weather_score}/100, "
-        f"stability {window.weather_stability_score}/100, distance {experience.distance_score}/100, "
-        f"holiday pressure {experience.holiday_pressure_score}/100, access {experience.access_score}/100, "
-        f"trip efficiency {experience.trip_efficiency_score}/100."
+        f"{destination} is het {quality}: weer {experience.weather_score}/100, "
+        f"stabiliteit {window.weather_stability_score}/100, afstand {experience.distance_score}/100, "
+        f"vakantiedruk {experience.holiday_pressure_score}/100, toegang {experience.access_score}/100, "
+        f"ritefficientie {experience.trip_efficiency_score}/100."
     )
 
 
 def _tradeoffs(experience: Any, window: Any) -> list[str]:
     tradeoffs: list[str] = []
     if experience.weather_score == 0:
-        tradeoffs.append("Weather score is 0/100, so this is only shown as a least-bad option.")
+        tradeoffs.append("De weerscore is 0/100; dit is alleen zichtbaar als minst slechte optie.")
     if experience.weather_score < 80:
-        tradeoffs.append(f"Weather is only {experience.weather_score}/100 for this window.")
+        tradeoffs.append(f"Weer scoort {experience.weather_score}/100 voor dit venster.")
     if window.weather_stability_score < 80:
-        tradeoffs.append(f"Forecast stability is {window.weather_stability_score}/100, so one day may be weaker.")
+        tradeoffs.append(f"Weerstabiliteit is {window.weather_stability_score}/100; een dag kan zwakker zijn.")
     if experience.temperature_score < 80:
-        tradeoffs.append(f"Temperature comfort scores {experience.temperature_score}/100.")
+        tradeoffs.append(f"Temperatuurcomfort scoort {experience.temperature_score}/100.")
     if experience.distance_score < 80:
-        tradeoffs.append(f"Distance scores {experience.distance_score}/100 and may be a longer transfer.")
+        tradeoffs.append(f"Afstand scoort {experience.distance_score}/100; de aanrijroute kan lang zijn.")
     if experience.trip_efficiency_score < 80:
         tradeoffs.append(
-            f"Trip efficiency scores {experience.trip_efficiency_score}/100; too much time may be spent getting there."
+            f"Ritefficientie scoort {experience.trip_efficiency_score}/100; er gaat relatief veel tijd naar "
+            "aan- en terugrijden."
         )
     if experience.holiday_pressure_score < 80:
-        tradeoffs.append(f"Holiday pressure scores {experience.holiday_pressure_score}/100.")
+        tradeoffs.append(f"Vakantiedruk scoort {experience.holiday_pressure_score}/100.")
     if experience.access_score < 80:
-        tradeoffs.append(f"Access scores {experience.access_score}/100; check local route restrictions.")
-    return tradeoffs or ["No major trade-offs detected in the current forecast window."]
+        tradeoffs.append(f"Toegang scoort {experience.access_score}/100; controleer lokale routebeperkingen.")
+    return tradeoffs or ["Geen grote trade-off gevonden in het huidige ritvenster."]
 
 
 def _weekday_label(value: date) -> str:
