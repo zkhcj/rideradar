@@ -5,6 +5,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.rideradar import async_setup_entry, async_unload_entry
 from custom_components.rideradar.const import DOMAIN
 from custom_components.rideradar.coordinator import RideRadarDataCoordinator
+from custom_components.rideradar.sensor import async_setup_entry as async_setup_sensor
 
 
 async def test_setup_and_unload_entry(hass, monkeypatch) -> None:
@@ -34,3 +35,25 @@ async def test_setup_and_unload_entry(hass, monkeypatch) -> None:
 
     assert await async_unload_entry(hass, entry) is True
     assert DOMAIN not in hass.data
+
+
+async def test_destination_sensors_are_created_before_first_forecast(hass) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            "start_latitude": 50,
+            "start_longitude": 4,
+            "enabled_default_destinations": ["Sauerland"],
+            "custom_destinations": [],
+        },
+    )
+    coordinator = RideRadarDataCoordinator(hass, entry, api_client=object())
+    coordinator.data = coordinator.unavailable_data()
+    hass.data[DOMAIN] = {entry.entry_id: coordinator}
+    entities = []
+
+    await async_setup_sensor(hass, entry, entities.extend)
+
+    unique_ids = {entity.unique_id for entity in entities}
+    assert f"{entry.entry_id}_destination_sauerland" in unique_ids
+    assert f"{entry.entry_id}_destination_sauerland_best_future_window" in unique_ids

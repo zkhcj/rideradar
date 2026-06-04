@@ -17,6 +17,7 @@ from homeassistant.util import slugify
 
 from .const import ATTRIBUTION, DOMAIN, MANUFACTURER
 from .coordinator import RideRadarDataCoordinator
+from .destinations import destinations_from_config
 from .models import DestinationResult
 from .scoring import calculate_ride_experience
 
@@ -239,10 +240,9 @@ async def async_setup_entry(
             lambda data: data.get("destination_count"),
         ),
     ]
-    for result in coordinator.data.get("results", []) if coordinator.data else []:
-        if isinstance(result, DestinationResult):
-            entities.append(RideRadarDestinationSensor(entry, coordinator, result.destination.name))
-            entities.append(RideRadarDestinationFutureWindowSensor(entry, coordinator, result.destination.name))
+    for destination in destinations_from_config(coordinator.config):
+        entities.append(RideRadarDestinationSensor(entry, coordinator, destination.name))
+        entities.append(RideRadarDestinationFutureWindowSensor(entry, coordinator, destination.name))
     async_add_entities(entities)
 
 
