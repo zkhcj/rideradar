@@ -35,12 +35,14 @@ from .const import (
     CONF_START_ADDRESS,
     CONF_START_LATITUDE,
     CONF_START_LONGITUDE,
+    CONF_TRAILER_SUPPORT_ENABLED,
     DEFAULT_ACTIVITY_PROFILE,
     DEFAULT_CUSTOM_TRIP_DURATION_DAYS,
     DEFAULT_DETOUR_FACTOR,
     DEFAULT_FORECAST_DAYS,
     DEFAULT_MAX_ROUTE_DISTANCE_KM,
     DEFAULT_PREFERRED_TRIP_DURATION,
+    DEFAULT_TRAILER_SUPPORT_ENABLED,
     DOMAIN,
     MAX_DETOUR_FACTOR,
     MAX_FORECAST_DAYS,
@@ -617,6 +619,7 @@ def _settings_schema(defaults: dict[str, Any], include_destinations: bool = True
                     {"value": "1", "label": "1 day"},
                     {"value": "2", "label": "2 days"},
                     {"value": "3", "label": "3 days"},
+                    {"value": "flexible", "label": "Flexible"},
                     {"value": "custom", "label": "Custom"},
                 ],
                 mode=SelectSelectorMode.DROPDOWN,
@@ -645,6 +648,10 @@ def _settings_schema(defaults: dict[str, Any], include_destinations: bool = True
         ): NumberSelector(
             NumberSelectorConfig(mode=NumberSelectorMode.BOX, min=MIN_DETOUR_FACTOR, max=MAX_DETOUR_FACTOR, step=0.05)
         ),
+        vol.Required(
+            CONF_TRAILER_SUPPORT_ENABLED,
+            default=defaults.get(CONF_TRAILER_SUPPORT_ENABLED, DEFAULT_TRAILER_SUPPORT_ENABLED),
+        ): BooleanSelector(),
     }
     if include_destinations:
         schema[
@@ -725,7 +732,7 @@ def _settings_errors(data: dict[str, Any]) -> dict[str, str]:
     custom_duration = _as_int(data.get(CONF_CUSTOM_TRIP_DURATION_DAYS))
     if custom_duration is None or custom_duration < MIN_TRIP_DURATION_DAYS:
         errors[CONF_CUSTOM_TRIP_DURATION_DAYS] = "invalid_trip_duration"
-    elif preferred_duration == "custom" and forecast_days is not None and custom_duration > forecast_days:
+    elif preferred_duration in {"custom", "flexible"} and forecast_days is not None and custom_duration > forecast_days:
         errors[CONF_CUSTOM_TRIP_DURATION_DAYS] = "invalid_trip_duration"
     elif custom_duration > MAX_FORECAST_DAYS:
         errors[CONF_CUSTOM_TRIP_DURATION_DAYS] = "invalid_trip_duration"
@@ -751,6 +758,7 @@ def _normalized_settings(data: dict[str, Any]) -> dict[str, Any]:
         CONF_CUSTOM_TRIP_DURATION_DAYS: int(data[CONF_CUSTOM_TRIP_DURATION_DAYS]),
         CONF_ACTIVITY_PROFILE: str(data[CONF_ACTIVITY_PROFILE]),
         CONF_DETOUR_FACTOR: float(data[CONF_DETOUR_FACTOR]),
+        CONF_TRAILER_SUPPORT_ENABLED: bool(data[CONF_TRAILER_SUPPORT_ENABLED]),
     }
 
 

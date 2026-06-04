@@ -46,6 +46,17 @@ class ScoringProfile:
     gust_penalty_start_kmh: float
 
 
+@dataclass(frozen=True, slots=True)
+class TripPlanningProfile:
+    """Runtime planning assumptions used for trip practicality scoring."""
+
+    travel_strategy: str = "motorcycle_direct"
+    available_hours_per_day: float = 8.0
+    max_approach_time_hours: float = 4.0
+    trailer_support_enabled: bool = False
+    trailer_available: bool = False
+
+
 SCORING_PROFILES = {
     DEFAULT_ACTIVITY_PROFILE: ScoringProfile(
         ideal_min_temp_c=14,
@@ -222,13 +233,33 @@ def calculate_best_trip_window(
     )
 
 
+def calculate_variable_trip_windows(
+    forecasts: list[DailyForecast],
+    min_duration: int,
+    max_duration: int,
+    activity_profile: str = DEFAULT_ACTIVITY_PROFILE,
+) -> list[TripWindow]:
+    """Evaluate complete windows for every duration in the requested range."""
+    if max_duration < min_duration:
+        return []
+    windows: list[TripWindow] = []
+    for duration in range(min_duration, max_duration + 1):
+        windows.extend(calculate_trip_windows(forecasts, duration, activity_profile))
+    return sorted(
+        windows,
+        key=lambda window: (window.start_day, window.duration_days),
+    )
+
+
 def calculate_ride_experience(
     destination: DestinationArea,
     route: RouteInfo,
     window: TripWindow,
     forecasts: list[DailyForecast],
+    planning_profile: TripPlanningProfile | None = None,
 ) -> RideExperience:
     """Calculate rider-facing quality for one complete trip window."""
+    planning_profile = planning_profile or TripPlanningProfile()
     dates = _window_dates(window)
     profile = _destination_profile(destination)
     holiday_names = _holiday_names(dates)
@@ -247,24 +278,30 @@ def calculate_ride_experience(
     access_score = motorcycle_access_score
     distance_score = _distance_score(route.distance_km)
     temperature_score = _temperature_score([forecast for forecast in forecasts if forecast.date in window.daily_scores])
+    trip_efficiency = calculate_trip_efficiency(route, window, planning_profile)
     road_fun_score = int(profile["fun"])
 
     ride_quality_score = _clamp_score(
-        (window.trip_score * 0.40)
-        + (window.weather_stability_score * 0.25)
+        (window.trip_score * 0.32)
+        + (window.weather_stability_score * 0.18)
         + (temperature_score * 0.10)
         + (distance_score * 0.10)
         + (holiday_pressure_score * 0.10)
         + (access_score * 0.05)
+        + (trip_efficiency["trip_efficiency_score"] * 0.15)
     )
+    if trip_efficiency["exclusion_reasons"]:
+        ride_quality_score = min(ride_quality_score, 45)
 
     explanation = _experience_explanation(
         ride_quality_score,
         traffic_score,
         tourism_pressure_score,
         motorcycle_access_score,
+        trip_efficiency["trip_efficiency_score"],
         holiday_names,
         access_notes,
+        trip_efficiency["exclusion_reasons"],
     )
     return RideExperience(
         ride_quality_score=ride_quality_score,
@@ -277,11 +314,84 @@ def calculate_ride_experience(
         motorcycle_access_score=motorcycle_access_score,
         distance_score=distance_score,
         temperature_score=temperature_score,
+        trip_efficiency_score=int(trip_efficiency["trip_efficiency_score"]),
+        travel_strategy=str(trip_efficiency["travel_strategy"]),
+        approach_time_hours=float(trip_efficiency["approach_time_hours"]),
+        return_time_hours=float(trip_efficiency["return_time_hours"]),
+        total_available_time_hours=float(trip_efficiency["total_available_time_hours"]),
+        estimated_destination_ride_time_hours=float(trip_efficiency["estimated_destination_ride_time_hours"]),
+        approach_enjoyment_factor=float(trip_efficiency["approach_enjoyment_factor"]),
+        destination_ride_time_ratio=float(trip_efficiency["destination_ride_time_ratio"]),
         road_fun_score=road_fun_score,
         holiday_names=holiday_names,
         access_notes=access_notes,
+        access_warnings=[] if access_score >= 80 else access_notes,
+        known_restrictions=[] if "no major motorcycle restrictions" in access_notes[0] else access_notes,
+        exclusion_reasons=list(trip_efficiency["exclusion_reasons"]),
         explanation=explanation,
     )
+
+
+def calculate_trip_efficiency(
+    route: RouteInfo,
+    window: TripWindow,
+    planning_profile: TripPlanningProfile | None = None,
+) -> dict[str, object]:
+    """Calculate how much of the selected trip can be spent riding the destination."""
+    planning_profile = planning_profile or TripPlanningProfile()
+    strategy = planning_profile.travel_strategy
+    approach_time_hours = route.travel_time_minutes / 60
+    if strategy == "motorcycle_scenic":
+        approach_time_hours *= 1.18
+        approach_enjoyment_factor = 0.45
+    elif strategy == "trailer":
+        approach_enjoyment_factor = 0.0
+    else:
+        strategy = "motorcycle_direct"
+        approach_enjoyment_factor = 0.20
+
+    exclusion_reasons: list[str] = []
+    if strategy == "trailer" and not planning_profile.trailer_support_enabled:
+        exclusion_reasons.append("Trailer transport is disabled in RideRadar options.")
+    if strategy == "trailer" and not planning_profile.trailer_available:
+        exclusion_reasons.append("Trailer transport was selected but the trailer is not available.")
+    if approach_time_hours > planning_profile.max_approach_time_hours:
+        exclusion_reasons.append("Outside configured max travel effort.")
+
+    return_time_hours = approach_time_hours
+    total_available_time_hours = max(1.0, planning_profile.available_hours_per_day * window.duration_days)
+    transfer_time = approach_time_hours + return_time_hours
+    usable_trip_time = max(0.0, total_available_time_hours - transfer_time)
+    enjoyable_approach_time = 0.0 if strategy == "trailer" else transfer_time * approach_enjoyment_factor
+    enjoyable_time = min(total_available_time_hours, usable_trip_time + enjoyable_approach_time)
+    destination_ride_time_ratio = usable_trip_time / total_available_time_hours
+    enjoyment_ratio = enjoyable_time / total_available_time_hours
+
+    if destination_ride_time_ratio >= 0.60:
+        score = 95
+    elif destination_ride_time_ratio >= 0.45:
+        score = 82
+    elif destination_ride_time_ratio >= 0.30:
+        score = 62
+    elif destination_ride_time_ratio >= 0.15:
+        score = 38
+    else:
+        score = 18
+    score = _clamp_score((score * 0.75) + (enjoyment_ratio * 100 * 0.25))
+    if exclusion_reasons:
+        score = min(score, 30)
+
+    return {
+        "travel_strategy": strategy,
+        "approach_time_hours": round(approach_time_hours, 2),
+        "return_time_hours": round(return_time_hours, 2),
+        "total_available_time_hours": round(total_available_time_hours, 2),
+        "estimated_destination_ride_time_hours": round(usable_trip_time, 2),
+        "approach_enjoyment_factor": round(approach_enjoyment_factor, 2),
+        "destination_ride_time_ratio": round(destination_ride_time_ratio, 3),
+        "trip_efficiency_score": score,
+        "exclusion_reasons": exclusion_reasons,
+    }
 
 
 def _bad_weather_penalty(scores: list[int], forecasts: list[DailyForecast]) -> float:
@@ -445,10 +555,14 @@ def _experience_explanation(
     traffic_score: int,
     tourism_score: int,
     access_score: int,
+    trip_efficiency_score: int,
     holiday_names: list[str],
     access_notes: list[str],
+    exclusion_reasons: list[str],
 ) -> str:
     parts = [f"Ride quality is {ride_quality_score}/100."]
+    if exclusion_reasons:
+        parts.append("This option is excluded because " + "; ".join(exclusion_reasons) + ".")
     if traffic_score >= 80:
         parts.append("Traffic pressure is expected to stay low.")
     elif traffic_score >= 60:
@@ -459,6 +573,12 @@ def _experience_explanation(
         parts.append(f"Holiday pressure is elevated around {', '.join(holiday_names)}.")
     if tourism_score < 65:
         parts.append("Tourism pressure may make scenic routes busier than usual.")
+    if trip_efficiency_score >= 80:
+        parts.append("Travel effort leaves enough usable destination riding time.")
+    elif trip_efficiency_score >= 60:
+        parts.append("Travel effort is acceptable but reduces destination riding time.")
+    else:
+        parts.append("Travel effort leaves too little useful destination riding time for this trip type.")
     if access_score < 80:
         parts.append("Motorcycle access is partially constrained by known regional restriction risk.")
     else:

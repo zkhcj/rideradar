@@ -30,6 +30,7 @@
           "custom_trip_duration_days": "Aangepaste reisduur",
           "activity_profile": "Activiteitsprofiel",
           "detour_factor": "Omwegfactor voor fallback-route",
+          "trailer_support_enabled": "Trailertransportstrategie inschakelen",
           "enabled_default_destinations": "Ingeschakelde standaardbestemmingen"
         }
       }
@@ -63,6 +64,7 @@
           "custom_trip_duration_days": "Aangepaste reisduur",
           "activity_profile": "Activiteitsprofiel",
           "detour_factor": "Omwegfactor voor fallback-route",
+          "trailer_support_enabled": "Trailertransportstrategie inschakelen",
           "enabled_destinations": "Ingeschakelde bestemmingen"
         }
       },
@@ -103,7 +105,8 @@
           "preferred_trip_duration": "Gewenste reisduur",
           "custom_trip_duration_days": "Aangepaste reisduur",
           "activity_profile": "Activiteitsprofiel",
-          "detour_factor": "Omwegfactor voor fallback-route"
+          "detour_factor": "Omwegfactor voor fallback-route",
+          "trailer_support_enabled": "Trailertransportstrategie inschakelen"
         }
       },
       "destinations": {

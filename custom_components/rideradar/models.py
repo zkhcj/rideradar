@@ -65,6 +65,28 @@ class RouteInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class RouteAnalysis:
+    """Prepared structure for future GPX or route-based destination analysis."""
+
+    route_name: str
+    route_distance_km: float
+    route_duration_estimate_minutes: int
+    bounding_box: tuple[float, float, float, float]
+    midpoint: tuple[float, float]
+    elevation_gain_m: float | None
+    route_points: list[tuple[float, float]]
+    matched_destination_region: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RouteBasedDestination:
+    """A future route-based alternative to region-based destination scoring."""
+
+    destination: DestinationArea
+    route_analysis: RouteAnalysis
+
+
+@dataclass(frozen=True, slots=True)
 class DailyForecast:
     """Weather forecast values for a destination on one day."""
 
@@ -126,9 +148,20 @@ class RideExperience:
     motorcycle_access_score: int
     distance_score: int
     temperature_score: int
+    trip_efficiency_score: int
+    travel_strategy: str
+    approach_time_hours: float
+    return_time_hours: float
+    total_available_time_hours: float
+    estimated_destination_ride_time_hours: float
+    approach_enjoyment_factor: float
+    destination_ride_time_ratio: float
     road_fun_score: int
     holiday_names: list[str]
     access_notes: list[str]
+    access_warnings: list[str]
+    known_restrictions: list[str]
+    exclusion_reasons: list[str]
     explanation: str
 
 
@@ -158,6 +191,7 @@ class DestinationResult:
     reachable: bool
     available: bool
     explanation: str
+    exclusion_reasons: list[str]
 
 
 def _required_text(value: dict[str, Any], key: str) -> str:

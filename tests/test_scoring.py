@@ -2,10 +2,13 @@
 
 from custom_components.rideradar.models import DailyForecast, DestinationArea, RouteInfo
 from custom_components.rideradar.scoring import (
+    TripPlanningProfile,
     calculate_best_trip_window,
     calculate_ride_experience,
     calculate_ride_score,
+    calculate_trip_efficiency,
     calculate_trip_windows,
+    calculate_variable_trip_windows,
     calculate_weather_stability_score,
 )
 
@@ -105,6 +108,20 @@ def test_different_trip_durations_change_window_selection() -> None:
     assert two_days.start_day == "Friday"
 
 
+def test_variable_duration_scores_all_supported_windows() -> None:
+    forecasts = [
+        DailyForecast("2026-06-01", 20, 0, 0, 10, 15, 20, 1),
+        DailyForecast("2026-06-02", 21, 0, 0, 10, 15, 20, 1),
+        DailyForecast("2026-06-03", 10, 90, 8, 40, 60, 95, 61),
+    ]
+
+    windows = calculate_variable_trip_windows(forecasts, 1, 3)
+
+    assert [window.duration_days for window in windows].count(1) == 3
+    assert [window.duration_days for window in windows].count(2) == 2
+    assert [window.duration_days for window in windows].count(3) == 1
+
+
 def test_limited_forecast_data_has_no_complete_trip_window() -> None:
     forecasts = [DailyForecast("Friday", 22, 0, 0, 10, 15, 20, 1)]
 
@@ -153,3 +170,40 @@ def test_ride_experience_penalizes_weekend_motorcycle_restriction_risk() -> None
     assert experience.motorcycle_access_score == experience.access_score
     assert experience.tourism_pressure_score < 80
     assert experience.access_notes
+
+
+def test_trip_efficiency_penalizes_far_day_trips_more_than_multi_day_trips() -> None:
+    day_window = calculate_best_trip_window([DailyForecast("2026-06-06", 22, 0, 0, 10, 15, 20, 1)], 1)
+    multi_day_window = calculate_best_trip_window(
+        [
+            DailyForecast("2026-06-06", 22, 0, 0, 10, 15, 20, 1),
+            DailyForecast("2026-06-07", 22, 0, 0, 10, 15, 20, 1),
+            DailyForecast("2026-06-08", 22, 0, 0, 10, 15, 20, 1),
+        ],
+        3,
+    )
+
+    assert day_window is not None
+    assert multi_day_window is not None
+    route = RouteInfo(420, 180, "test")
+
+    day_efficiency = calculate_trip_efficiency(route, day_window, TripPlanningProfile())
+    multi_day_efficiency = calculate_trip_efficiency(route, multi_day_window, TripPlanningProfile())
+
+    assert day_efficiency["trip_efficiency_score"] < multi_day_efficiency["trip_efficiency_score"]
+    assert day_efficiency["destination_ride_time_ratio"] < 0.30
+    assert multi_day_efficiency["destination_ride_time_ratio"] >= 0.45
+
+
+def test_trailer_strategy_requires_enabled_and_available_trailer() -> None:
+    window = calculate_best_trip_window([DailyForecast("2026-06-06", 22, 0, 0, 10, 15, 20, 1)], 1)
+
+    assert window is not None
+    efficiency = calculate_trip_efficiency(
+        RouteInfo(150, 90, "test"),
+        window,
+        TripPlanningProfile(travel_strategy="trailer", trailer_support_enabled=True, trailer_available=False),
+    )
+
+    assert efficiency["trip_efficiency_score"] <= 30
+    assert "trailer is not available" in efficiency["exclusion_reasons"][0]

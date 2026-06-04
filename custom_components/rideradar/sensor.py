@@ -74,6 +74,10 @@ async def async_setup_entry(
             coordinator,
             SensorEntityDescription(key="best_trip_start_day", name="Best Trip Start Day", icon="mdi:calendar-start"),
             lambda data: _best_attr(data, "trip_start_day"),
+            lambda data: {
+                "date": _best_attr(data, "trip_start_day_iso"),
+                "date_display": _best_attr(data, "trip_start_day"),
+            },
         ),
         RideRadarSensor(
             entry,
@@ -84,7 +88,18 @@ async def async_setup_entry(
                 icon="mdi:calendar-range",
                 state_class=SensorStateClass.MEASUREMENT,
             ),
-            lambda data: _best_attr(data, "trip_duration"),
+            lambda data: data.get("trip_duration"),
+            lambda data: {
+                "duration_mode": data.get("duration_mode"),
+                "duration_label": data.get("trip_duration_label"),
+                "duration_source": data.get("trip_duration_source"),
+                "min_duration_days": data.get("min_duration_days"),
+                "max_duration_days": data.get("max_duration_days"),
+                "selected_duration_days": data.get("selected_duration_days"),
+                "best_duration_days": data.get("best_duration_days"),
+                "weekend_only": data.get("weekend_only"),
+                "preferred_start_weekday": data.get("preferred_start_weekday"),
+            },
         ),
         RideRadarSensor(
             entry,
@@ -109,13 +124,44 @@ async def async_setup_entry(
             coordinator,
             SensorEntityDescription(key="best_summary", name="Best Summary", icon="mdi:text-box-check"),
             lambda data: data.get("summary"),
+            lambda data: {
+                "active_helpers": data.get("active_helpers", {}),
+                "excluded_destinations": data.get("excluded_destinations", []),
+                "top_exclusion_reason": _top_exclusion_reason(data.get("excluded_destinations")),
+                "best_decision_trace": _best_decision_trace(data),
+            },
         ),
         RideRadarSensor(
             entry,
             coordinator,
             SensorEntityDescription(key="best_opportunities", name="Best Opportunities", icon="mdi:calendar-star"),
             lambda data: _opportunity_summary(data.get("opportunities")),
-            lambda data: {"opportunities": data.get("opportunities", [])},
+            lambda data: {
+                "opportunities": data.get("opportunities", []),
+                "excluded_destinations": data.get("excluded_destinations", []),
+            },
+        ),
+        RideRadarSensor(
+            entry,
+            coordinator,
+            SensorEntityDescription(
+                key="top_week_opportunities",
+                name="Top Week Opportunities",
+                icon="mdi:calendar-week",
+            ),
+            lambda data: _top_opportunity_summary(data.get("top_week_opportunities")),
+            lambda data: {"opportunities": data.get("top_week_opportunities", [])},
+        ),
+        RideRadarSensor(
+            entry,
+            coordinator,
+            SensorEntityDescription(
+                key="top_month_opportunities",
+                name="Top Month Opportunities",
+                icon="mdi:calendar-month",
+            ),
+            lambda data: _top_opportunity_summary(data.get("top_month_opportunities")),
+            lambda data: {"opportunities": data.get("top_month_opportunities", [])},
         ),
         RideRadarSensor(
             entry,
@@ -250,28 +296,43 @@ class RideRadarDestinationSensor(CoordinatorEntity[RideRadarDataCoordinator], Se
             return {}
         forecast = result.best_forecast
         route = result.route
+        planning_profile = (self.coordinator.data or {}).get("planning_profile")
         return {
             "trip_score": result.trip_score,
             "ride_quality_score": result.ride_quality_score,
             "ride_experience": _experience_attributes(result),
-            "best_future_window": _best_future_window(result),
-            "best_trip_window": _trip_window_attributes(result),
-            "all_trip_windows": _trip_windows_attributes(result),
-            "next_good_window": _next_good_window(result),
-            "weekend_windows": _trip_windows_attributes(result, "weekend"),
-            "weekday_windows": _trip_windows_attributes(result, "weekday"),
-            "best_start_day": result.best_start_day,
+            "best_future_window": _best_future_window(result, planning_profile),
+            "best_trip_window": _trip_window_attributes(result, planning_profile),
+            "all_trip_windows": _trip_windows_attributes(result, planning_profile=planning_profile),
+            "next_good_window": _next_good_window(result, planning_profile),
+            "weekend_windows": _trip_windows_attributes(result, "weekend", planning_profile),
+            "weekday_windows": _trip_windows_attributes(result, "weekday", planning_profile),
+            "best_start_day": _format_date(result.best_start_day),
+            "best_start_day_iso": result.best_start_day,
             "trip_duration": result.trip_duration,
+            "duration_mode": (self.coordinator.data or {}).get("duration_mode"),
+            "min_duration_days": (self.coordinator.data or {}).get("min_duration_days"),
+            "max_duration_days": (self.coordinator.data or {}).get("max_duration_days"),
+            "selected_duration_days": (self.coordinator.data or {}).get("selected_duration_days"),
+            "best_duration_days": result.trip_duration if result.best_trip_window else None,
             "weather_stability_score": result.weather_stability_score,
             "stability_explanation": result.stability_explanation,
             "daily_scores": result.daily_scores,
             "trip_score_breakdown": _breakdown_attributes(result),
+            "score_breakdown": _score_breakdown_attributes(result),
             "trip_explanation": result.trip_explanation,
+            "recommendation_reason": _recommendation_reason(result),
+            "tradeoffs": _tradeoffs(result),
             "score_per_day": {date: score.score for date, score in result.scores.items()},
             "explanation_per_day": {date: score.explanation for date, score in result.scores.items()},
             "best_day": result.best_day,
             "route_distance_km": route.distance_km if route else None,
             "estimated_travel_time": _format_minutes(route.travel_time_minutes) if route else None,
+            "travel_strategy": (self.coordinator.data or {}).get("travel_strategy"),
+            "available_hours_per_day": (self.coordinator.data or {}).get("available_hours_per_day"),
+            "max_approach_time_hours": (self.coordinator.data or {}).get("max_approach_time_hours"),
+            "weekend_only": (self.coordinator.data or {}).get("weekend_only"),
+            "preferred_start_weekday": (self.coordinator.data or {}).get("preferred_start_weekday"),
             "temperature": forecast.temperature_c if forecast else None,
             "precipitation_probability": forecast.precipitation_probability if forecast else None,
             "precipitation_amount": forecast.precipitation_amount_mm if forecast else None,
@@ -281,6 +342,7 @@ class RideRadarDestinationSensor(CoordinatorEntity[RideRadarDataCoordinator], Se
             "weather_code": forecast.weather_code if forecast else None,
             "reachable": result.reachable,
             "explanation": result.explanation,
+            "exclusion_reasons": result.exclusion_reasons,
             "routing_provider": route.provider if route else None,
             "country_region": result.destination.country_region,
             "notes": result.destination.notes,
@@ -343,7 +405,7 @@ class RideRadarDestinationFutureWindowSensor(CoordinatorEntity[RideRadarDataCoor
         result = self._result
         if result is None:
             return None
-        return _best_future_window(result)
+        return _best_future_window(result, (self.coordinator.data or {}).get("planning_profile"))
 
     @property
     def _result(self) -> DestinationResult | None:
@@ -375,6 +437,8 @@ def _best_attr(data: dict[str, object], key: str) -> Any:
     if key == "score":
         return best.best_score
     if key == "trip_start_day":
+        return _format_date(best.best_start_day)
+    if key == "trip_start_day_iso":
         return best.best_start_day
     if key == "trip_duration":
         return best.trip_duration
@@ -390,37 +454,48 @@ def _format_minutes(minutes: int) -> str:
     return f"{remainder}m"
 
 
-def _trip_window_attributes(result: DestinationResult) -> dict[str, Any] | None:
+def _trip_window_attributes(result: DestinationResult, planning_profile: Any = None) -> dict[str, Any] | None:
     window = result.best_trip_window
     if window is None:
         return None
-    return _window_attributes(result, window)
+    return _window_attributes(result, window, planning_profile)
 
 
-def _trip_windows_attributes(result: DestinationResult, window_type: str | None = None) -> list[dict[str, Any]]:
-    windows = [_window_attributes(result, window) for window in result.all_trip_windows]
+def _trip_windows_attributes(
+    result: DestinationResult,
+    window_type: str | None = None,
+    planning_profile: Any = None,
+) -> list[dict[str, Any]]:
+    windows = [_window_attributes(result, window, planning_profile) for window in result.all_trip_windows]
     if window_type is None:
         return windows
     return [window for window in windows if window["window_type"] == window_type]
 
 
-def _next_good_window(result: DestinationResult) -> dict[str, Any] | None:
+def _next_good_window(result: DestinationResult, planning_profile: Any = None) -> dict[str, Any] | None:
     return next(
-        (window for window in _trip_windows_attributes(result) if int(window["ride_quality_score"]) >= 70),
+        (
+            window
+            for window in _trip_windows_attributes(result, planning_profile=planning_profile)
+            if int(window["ride_quality_score"]) >= 70 and not window["exclusion_reasons"]
+        ),
         None,
     )
 
 
-def _window_attributes(result: DestinationResult, window: Any) -> dict[str, Any]:
+def _window_attributes(result: DestinationResult, window: Any, planning_profile: Any = None) -> dict[str, Any]:
     route = result.route
     weekend = _is_weekend(window.start_day, window.end_day)
     experience = None
     if route is not None:
-        experience = calculate_ride_experience(result.destination, route, window, result.forecasts)
+        experience = calculate_ride_experience(result.destination, route, window, result.forecasts, planning_profile)
     return {
         "destination": result.destination.name,
         "start_date": window.start_day,
         "end_date": window.end_day,
+        "start_date_display": _format_date(window.start_day),
+        "end_date_display": _format_date(window.end_day),
+        "period": _format_period(window.start_day, window.end_day),
         "start_day": window.start_day,
         "end_day": window.end_day,
         "duration_days": window.duration_days,
@@ -439,9 +514,27 @@ def _window_attributes(result: DestinationResult, window: Any) -> dict[str, Any]
         "access_status": _access_status(experience.motorcycle_access_score) if experience else None,
         "distance_score": experience.distance_score if experience else None,
         "temperature_score": experience.temperature_score if experience else None,
+        "trip_efficiency_score": experience.trip_efficiency_score if experience else None,
+        "travel_strategy": experience.travel_strategy if experience else None,
+        "approach_time_hours": experience.approach_time_hours if experience else None,
+        "return_time_hours": experience.return_time_hours if experience else None,
+        "total_available_time_hours": experience.total_available_time_hours if experience else None,
+        "estimated_destination_ride_time_hours": (
+            experience.estimated_destination_ride_time_hours if experience else None
+        ),
+        "approach_enjoyment_factor": experience.approach_enjoyment_factor if experience else None,
+        "destination_ride_time_ratio": experience.destination_ride_time_ratio if experience else None,
+        "score_breakdown": _window_score_breakdown(experience, window) if experience else None,
+        "recommendation_reason": _window_recommendation_reason(result.destination.name, experience, window)
+        if experience
+        else window.trip_explanation,
+        "tradeoffs": _window_tradeoffs(experience, window) if experience else [],
         "road_fun_score": experience.road_fun_score if experience else None,
         "holiday_names": experience.holiday_names if experience else [],
         "access_notes": experience.access_notes if experience else [],
+        "access_warnings": experience.access_warnings if experience else [],
+        "known_restrictions": experience.known_restrictions if experience else [],
+        "exclusion_reasons": experience.exclusion_reasons if experience else [],
         "days_until": _days_until(window.start_day),
         "daily_scores": window.daily_scores,
         "route_distance_km": route.distance_km if route else None,
@@ -461,34 +554,57 @@ def _experience_attributes(result: DestinationResult) -> dict[str, Any] | None:
     return {
         "ride_quality_score": experience.ride_quality_score,
         "weather_score": experience.weather_score,
+        "stability_score": result.weather_stability_score,
+        "temperature_score": experience.temperature_score,
+        "distance_score": experience.distance_score,
+        "trip_efficiency_score": experience.trip_efficiency_score,
+        "travel_strategy": experience.travel_strategy,
+        "approach_time_hours": experience.approach_time_hours,
+        "return_time_hours": experience.return_time_hours,
+        "total_available_time_hours": experience.total_available_time_hours,
+        "estimated_destination_ride_time_hours": experience.estimated_destination_ride_time_hours,
+        "approach_enjoyment_factor": experience.approach_enjoyment_factor,
+        "destination_ride_time_ratio": experience.destination_ride_time_ratio,
+        "holiday_pressure_score": experience.holiday_pressure_score,
+        "access_score": experience.access_score,
+        "score_breakdown": _score_breakdown_attributes(result),
+        "recommendation_reason": _recommendation_reason(result),
+        "tradeoffs": _tradeoffs(result),
         "traffic_score": experience.traffic_score,
         "traffic_level": _pressure_level(experience.traffic_score),
         "tourism_pressure_score": experience.tourism_pressure_score,
         "tourism_level": _pressure_level(experience.tourism_pressure_score),
-        "holiday_pressure_score": experience.holiday_pressure_score,
         "holiday_score": experience.holiday_score,
-        "access_score": experience.access_score,
         "motorcycle_access_score": experience.motorcycle_access_score,
         "access_status": _access_status(experience.motorcycle_access_score),
-        "distance_score": experience.distance_score,
-        "temperature_score": experience.temperature_score,
         "road_fun_score": experience.road_fun_score,
         "holiday_names": experience.holiday_names,
         "access_notes": experience.access_notes,
+        "access_warnings": experience.access_warnings,
+        "known_restrictions": experience.known_restrictions,
+        "exclusion_reasons": experience.exclusion_reasons,
         "explanation": experience.explanation,
     }
 
 
-def _best_future_window(result: DestinationResult) -> dict[str, Any] | None:
-    windows = _trip_windows_attributes(result)
+def _best_future_window(result: DestinationResult, planning_profile: Any = None) -> dict[str, Any] | None:
+    windows = [window for window in _trip_windows_attributes(result, planning_profile=planning_profile)]
     if not windows:
         return None
-    best = max(windows, key=lambda window: int(window["ride_quality_score"]))
+    first = windows[0]
+    viable_windows = [window for window in windows if not window["exclusion_reasons"]]
+    best = max(viable_windows or windows, key=lambda window: int(window["ride_quality_score"]))
     return {
         "score": best["ride_quality_score"],
+        "current_score": first["ride_quality_score"],
+        "best_future_score": best["ride_quality_score"],
+        "best_future_window": best,
         "ride_quality_score": best["ride_quality_score"],
         "start_date": best["start_date"],
         "end_date": best["end_date"],
+        "start_date_display": best["start_date_display"],
+        "end_date_display": best["end_date_display"],
+        "period": best["period"],
         "duration_days": best["duration_days"],
         "days_until": best["days_until"],
         "explanation": best["explanation"],
@@ -496,6 +612,10 @@ def _best_future_window(result: DestinationResult) -> dict[str, Any] | None:
         "access_status": best["access_status"],
         "holiday_pressure_score": best["holiday_pressure_score"],
         "access_score": best["access_score"],
+        "score_breakdown": best["score_breakdown"],
+        "recommendation_reason": best["recommendation_reason"],
+        "tradeoffs": best["tradeoffs"],
+        "exclusion_reasons": best["exclusion_reasons"],
     }
 
 
@@ -518,10 +638,126 @@ def _opportunity_summary(value: object) -> str | None:
     return _single_opportunity_summary(value[0])
 
 
+def _top_opportunity_summary(value: object) -> str | None:
+    if not isinstance(value, list) or not value:
+        return None
+    return " | ".join(
+        f"{index}. {_single_opportunity_summary(opportunity)}" for index, opportunity in enumerate(value[:3], start=1)
+    )
+
+
+def _best_decision_trace(data: dict[str, object]) -> dict[str, Any] | None:
+    opportunity = data.get("best_next_available_opportunity")
+    if not isinstance(opportunity, dict):
+        return None
+    trace = opportunity.get("decision_trace")
+    return trace if isinstance(trace, dict) else None
+
+
+def _top_exclusion_reason(value: object) -> str | None:
+    if not isinstance(value, list) or not value:
+        return None
+    first = value[0]
+    if not isinstance(first, dict):
+        return None
+    return str(first.get("reason")) if first.get("reason") else None
+
+
 def _single_opportunity_summary(value: object) -> str | None:
     if not isinstance(value, dict):
         return None
-    return f"{value.get('destination')} from {value.get('start_date')}: {value.get('ride_quality_score')}/100"
+    period = value.get("period") or _format_period(value.get("start_date"), value.get("end_date"))
+    return f"{value.get('destination')} {period}: {value.get('ride_quality_score')}/100"
+
+
+def _format_date(value: object) -> str | None:
+    if value is None:
+        return None
+    try:
+        parsed = date.fromisoformat(str(value))
+    except ValueError:
+        return str(value) if str(value).strip() else None
+    return f"{_weekday_label(parsed)} {parsed.strftime('%d-%m-%Y')}"
+
+
+def _format_period(start_value: object, end_value: object) -> str:
+    start = _format_date(start_value)
+    end = _format_date(end_value)
+    if start and end:
+        return f"{start} t/m {end}"
+    return start or end or "unknown period"
+
+
+def _score_breakdown_attributes(result: DestinationResult) -> dict[str, int | None] | None:
+    experience = result.ride_experience
+    window = result.best_trip_window
+    if experience is None or window is None:
+        return None
+    return _window_score_breakdown(experience, window)
+
+
+def _window_score_breakdown(experience: Any, window: Any) -> dict[str, int]:
+    return {
+        "weather_score": experience.weather_score,
+        "stability_score": window.weather_stability_score,
+        "temperature_score": experience.temperature_score,
+        "distance_score": experience.distance_score,
+        "holiday_pressure_score": experience.holiday_pressure_score,
+        "access_score": experience.access_score,
+        "trip_efficiency_score": experience.trip_efficiency_score,
+        "ride_quality_score": experience.ride_quality_score,
+    }
+
+
+def _recommendation_reason(result: DestinationResult) -> str | None:
+    if result.ride_experience is None or result.best_trip_window is None:
+        return result.explanation
+    return _window_recommendation_reason(result.destination.name, result.ride_experience, result.best_trip_window)
+
+
+def _window_recommendation_reason(destination: str, experience: Any, window: Any) -> str:
+    if experience.ride_quality_score >= 85:
+        quality = "wins because it is dry, stable and practical"
+    elif experience.ride_quality_score >= 70:
+        quality = "wins because it has the best balance of weather and trip practicality"
+    else:
+        quality = "is the least compromised option in the current forecast"
+    return (
+        f"{destination} {quality}: weather {experience.weather_score}/100, stability "
+        f"{window.weather_stability_score}/100, temperature {experience.temperature_score}/100, "
+        f"distance {experience.distance_score}/100, holiday pressure "
+        f"{experience.holiday_pressure_score}/100, access {experience.access_score}/100, "
+        f"trip efficiency {experience.trip_efficiency_score}/100."
+    )
+
+
+def _tradeoffs(result: DestinationResult) -> list[str]:
+    if result.ride_experience is None or result.best_trip_window is None:
+        return []
+    return _window_tradeoffs(result.ride_experience, result.best_trip_window)
+
+
+def _window_tradeoffs(experience: Any, window: Any) -> list[str]:
+    tradeoffs: list[str] = []
+    if experience.weather_score < 80:
+        tradeoffs.append(f"Weather score is {experience.weather_score}/100.")
+    if window.weather_stability_score < 80:
+        tradeoffs.append(f"Stability score is {window.weather_stability_score}/100.")
+    if experience.temperature_score < 80:
+        tradeoffs.append(f"Temperature score is {experience.temperature_score}/100.")
+    if experience.distance_score < 80:
+        tradeoffs.append(f"Distance score is {experience.distance_score}/100.")
+    if experience.trip_efficiency_score < 80:
+        tradeoffs.append(f"Trip efficiency score is {experience.trip_efficiency_score}/100.")
+    if experience.holiday_pressure_score < 80:
+        tradeoffs.append(f"Holiday pressure score is {experience.holiday_pressure_score}/100.")
+    if experience.access_score < 80:
+        tradeoffs.append(f"Access score is {experience.access_score}/100.")
+    return tradeoffs or ["No major trade-offs detected."]
+
+
+def _weekday_label(value: date) -> str:
+    return ("Ma", "Di", "Wo", "Do", "Vr", "Za", "Zo")[value.weekday()]
 
 
 def _is_weekend(start_value: str, end_value: str) -> bool:

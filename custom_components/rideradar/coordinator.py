@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -15,30 +16,78 @@ from .const import (
     CONF_ACTIVITY_PROFILE,
     CONF_CUSTOM_TRIP_DURATION_DAYS,
     CONF_DETOUR_FACTOR,
+    CONF_DURATION_MODE,
     CONF_FORECAST_DAYS,
     CONF_MAX_ROUTE_DISTANCE_KM,
     CONF_PREFERRED_TRIP_DURATION,
     CONF_START_LATITUDE,
     CONF_START_LONGITUDE,
+    CONF_TRAILER_SUPPORT_ENABLED,
     DEFAULT_ACTIVITY_PROFILE,
+    DEFAULT_AVAILABLE_HOURS_PER_DAY,
     DEFAULT_CUSTOM_TRIP_DURATION_DAYS,
     DEFAULT_DETOUR_FACTOR,
+    DEFAULT_DURATION_MODE,
     DEFAULT_FORECAST_DAYS,
+    DEFAULT_MAX_APPROACH_TIME_HOURS,
     DEFAULT_MAX_ROUTE_DISTANCE_KM,
     DEFAULT_PREFERRED_TRIP_DURATION,
+    DEFAULT_TRAILER_SUPPORT_ENABLED,
+    DEFAULT_TRAVEL_STRATEGY,
     DOMAIN,
     MAX_FORECAST_DAYS,
     MIN_TRIP_DURATION_DAYS,
+    TRAVEL_STRATEGY_MOTORCYCLE_DIRECT,
+    TRAVEL_STRATEGY_OPTIONS,
     UPDATE_INTERVAL,
 )
-from .destinations import destinations_from_config
+from .destinations import all_destinations_for_options, destinations_from_config
 from .models import DestinationArea, DestinationResult, RideRadarConfigError
 from .routing import FallbackRoutingClient, RoutingClient
-from .scoring import calculate_ride_experience, calculate_ride_score, calculate_trip_windows
+from .scoring import (
+    TripPlanningProfile,
+    calculate_ride_experience,
+    calculate_ride_score,
+    calculate_variable_trip_windows,
+)
 
 LOGGER = logging.getLogger(__name__)
 
 CoordinatorData = dict[str, Any]
+
+TRIP_DURATION_NUMBER_ENTITY = "input_number.rideradar_trip_duration_days"
+TRIP_DURATION_SELECT_ENTITY = "input_select.rideradar_trip_duration"
+TRAVEL_STRATEGY_SELECT_ENTITY = "input_select.rideradar_travel_strategy"
+TRAILER_AVAILABLE_ENTITY = "input_boolean.rideradar_trailer_available"
+AVAILABLE_HOURS_ENTITY = "input_number.rideradar_available_hours_per_day"
+MAX_APPROACH_TIME_ENTITY = "input_number.rideradar_max_approach_time_hours"
+FORECAST_HORIZON_ENTITY = "input_number.rideradar_forecast_horizon_days"
+WEEKEND_ONLY_ENTITY = "input_boolean.rideradar_weekend_only"
+PREFERRED_START_DAY_ENTITY = "input_select.rideradar_preferred_start_day"
+
+
+@dataclass(frozen=True, slots=True)
+class TripDurationSelection:
+    """Resolved trip duration settings for this refresh."""
+
+    mode: str
+    min_days: int
+    max_days: int
+    source: str
+
+    @property
+    def label(self) -> str:
+        if self.mode == "flexible":
+            return f"{self.min_days}-{self.max_days} days"
+        return f"{self.max_days} day" if self.max_days == 1 else f"{self.max_days} days"
+
+
+@dataclass(frozen=True, slots=True)
+class WindowPreferences:
+    """Runtime filters for candidate trip windows."""
+
+    weekend_only: bool = False
+    preferred_start_weekday: int | None = None
 
 
 class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
@@ -76,24 +125,47 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             start_latitude = float(config[CONF_START_LATITUDE])
             start_longitude = float(config[CONF_START_LONGITUDE])
             max_route_distance_km = float(config.get(CONF_MAX_ROUTE_DISTANCE_KM, DEFAULT_MAX_ROUTE_DISTANCE_KM))
-            forecast_days = int(config.get(CONF_FORECAST_DAYS, DEFAULT_FORECAST_DAYS))
-            trip_duration = _trip_duration_from_config(config, forecast_days)
+            forecast_days = _forecast_days_selection(config, self.hass)
+            trip_duration = _trip_duration_selection(config, forecast_days, self.hass)
+            planning_profile = _trip_planning_profile(config, self.hass)
+            window_preferences = _window_preferences(self.hass)
+            active_helpers = _active_helper_states(self.hass)
             activity_profile = str(config.get(CONF_ACTIVITY_PROFILE, DEFAULT_ACTIVITY_PROFILE))
             destinations = destinations_from_config(config)
         except (KeyError, TypeError, ValueError, RideRadarConfigError) as err:
             raise UpdateFailed(f"Invalid RideRadar configuration: {err}") from err
 
         enabled_destinations = [destination for destination in destinations if destination.enabled]
+        disabled_destinations = _disabled_destinations(config)
         if not enabled_destinations:
             return {
                 "results": [],
                 "best": None,
                 "opportunities": [],
+                "top_week_opportunities": [],
+                "top_month_opportunities": [],
                 "best_weekend_opportunity": None,
                 "best_weekday_opportunity": None,
                 "best_next_available_opportunity": None,
                 "destination_count": 0,
                 "summary": "No enabled destinations configured",
+                "excluded_destinations": disabled_destinations,
+                "duration_mode": trip_duration.mode,
+                "trip_duration": trip_duration.max_days,
+                "trip_duration_label": trip_duration.label,
+                "trip_duration_source": trip_duration.source,
+                "min_duration_days": trip_duration.min_days,
+                "max_duration_days": trip_duration.max_days,
+                "selected_duration_days": trip_duration.max_days,
+                "best_duration_days": None,
+                "planning_profile": planning_profile,
+                "travel_strategy": planning_profile.travel_strategy,
+                "available_hours_per_day": planning_profile.available_hours_per_day,
+                "max_approach_time_hours": planning_profile.max_approach_time_hours,
+                "trailer_available": planning_profile.trailer_available,
+                "weekend_only": window_preferences.weekend_only,
+                "preferred_start_weekday": window_preferences.preferred_start_weekday,
+                "active_helpers": active_helpers,
             }
 
         results: list[DestinationResult] = []
@@ -107,6 +179,8 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                         max_route_distance_km,
                         forecast_days,
                         trip_duration,
+                        planning_profile,
+                        window_preferences,
                         activity_profile,
                     )
                 )
@@ -124,16 +198,57 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             key=lambda item: item.ride_quality_score or 0,
             default=None,
         )
-        opportunities = _opportunities(results)
+        opportunities = _ranked_opportunities(
+            _opportunities(
+                results,
+                planning_profile,
+                config,
+                forecast_days,
+                trip_duration,
+                window_preferences,
+                active_helpers,
+            )
+        )
+        top_week = _top_opportunities(opportunities, max_days_until=7)
+        top_month = _top_opportunities(opportunities)
+        excluded_destinations = _excluded_destinations(results) + disabled_destinations
+        if LOGGER.isEnabledFor(logging.DEBUG):
+            LOGGER.debug(
+                "RideRadar calculated %s candidate windows across %s destinations. "
+                "Best: %s. Excluded: %s destinations.",
+                len(opportunities),
+                len(results),
+                _best_debug_summary(best),
+                len(excluded_destinations),
+            )
         return {
             "results": results,
             "best": best,
             "opportunities": opportunities,
+            "top_week_opportunities": top_week,
+            "top_month_opportunities": top_month,
+            "excluded_destinations": excluded_destinations,
             "best_weekend_opportunity": _best_matching_opportunity(opportunities, "weekend"),
             "best_weekday_opportunity": _best_matching_opportunity(opportunities, "weekday"),
             "best_next_available_opportunity": opportunities[0] if opportunities else None,
             "destination_count": len(results),
             "summary": _summary(best),
+            "duration_mode": trip_duration.mode,
+            "trip_duration": best.trip_duration if best else trip_duration.max_days,
+            "trip_duration_label": trip_duration.label,
+            "trip_duration_source": trip_duration.source,
+            "min_duration_days": trip_duration.min_days,
+            "max_duration_days": trip_duration.max_days,
+            "selected_duration_days": trip_duration.max_days,
+            "best_duration_days": best.trip_duration if best else None,
+            "planning_profile": planning_profile,
+            "travel_strategy": planning_profile.travel_strategy,
+            "available_hours_per_day": planning_profile.available_hours_per_day,
+            "max_approach_time_hours": planning_profile.max_approach_time_hours,
+            "trailer_available": planning_profile.trailer_available,
+            "weekend_only": window_preferences.weekend_only,
+            "preferred_start_weekday": window_preferences.preferred_start_weekday,
+            "active_helpers": active_helpers,
         }
 
     async def _evaluate_destination(
@@ -143,7 +258,9 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         start_longitude: float,
         max_route_distance_km: float,
         forecast_days: int,
-        trip_duration: int,
+        trip_duration: TripDurationSelection,
+        planning_profile: TripPlanningProfile,
+        window_preferences: WindowPreferences,
         activity_profile: str,
     ) -> DestinationResult:
         """Evaluate route and forecast for one destination."""
@@ -165,7 +282,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 trip_score=None,
                 best_trip_window=None,
                 best_start_day=None,
-                trip_duration=trip_duration,
+                trip_duration=trip_duration.max_days,
                 weather_stability_score=None,
                 stability_explanation="No complete trip window is available.",
                 daily_scores={},
@@ -177,6 +294,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 reachable=False,
                 available=True,
                 explanation=f"Outside configured range ({route.distance_km:.0f} km)",
+                exclusion_reasons=["too_far"],
             )
 
         forecasts = await self.api_client.get_daily_forecast(
@@ -188,21 +306,39 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         best_forecast = max(forecasts, key=lambda item: scores[item.date].score, default=None)
         best_score = scores[best_forecast.date].score if best_forecast else None
         best_day = best_forecast.date if best_forecast else None
-        all_trip_windows = calculate_trip_windows(forecasts, trip_duration, activity_profile)
+        all_trip_windows = calculate_variable_trip_windows(
+            forecasts,
+            trip_duration.min_days,
+            trip_duration.max_days,
+            activity_profile,
+        )
+        all_trip_windows = [
+            window for window in all_trip_windows if _matches_window_preferences(window, window_preferences)
+        ]
         ride_experiences = [
-            (window, calculate_ride_experience(destination, route, window, forecasts)) for window in all_trip_windows
+            (window, calculate_ride_experience(destination, route, window, forecasts, planning_profile))
+            for window in all_trip_windows
+        ]
+        viable_ride_experiences = [
+            (window, experience) for window, experience in ride_experiences if not experience.exclusion_reasons
         ]
         best_trip_window, best_ride_experience = max(
-            ride_experiences,
+            viable_ride_experiences,
             key=lambda item: item[1].ride_quality_score,
             default=(None, None),
+        )
+        exclusion_reasons = _result_exclusion_reasons(
+            forecasts,
+            all_trip_windows,
+            ride_experiences,
+            window_preferences,
         )
         trip_explanation = (
             f"{best_trip_window.trip_explanation} {best_ride_experience.explanation}"
             if best_trip_window and best_ride_experience
-            else f"No complete {trip_duration}-day trip window is available in the forecast."
+            else f"No realistic {trip_duration.label} trip window is available in the forecast."
         )
-        explanation = trip_explanation if best_trip_window else "No forecast available"
+        explanation = trip_explanation if best_trip_window else "No realistic trip window available"
         return DestinationResult(
             destination=destination,
             route=route,
@@ -214,7 +350,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             trip_score=best_trip_window.trip_score if best_trip_window else None,
             best_trip_window=best_trip_window,
             best_start_day=best_trip_window.start_day if best_trip_window else None,
-            trip_duration=trip_duration,
+            trip_duration=best_trip_window.duration_days if best_trip_window else trip_duration.max_days,
             weather_stability_score=best_trip_window.weather_stability_score if best_trip_window else None,
             stability_explanation=best_trip_window.stability_explanation
             if best_trip_window
@@ -228,63 +364,346 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             reachable=True,
             available=bool(forecasts),
             explanation=explanation,
+            exclusion_reasons=exclusion_reasons,
         )
 
 
 def _summary(best: DestinationResult | None) -> str:
     if best is None:
         return "No reachable destination with forecast data"
+    period = (
+        _format_period(best.best_trip_window.start_day, best.best_trip_window.end_day)
+        if best.best_trip_window
+        else ""
+    )
     return (
         f"{best.destination.name}: {best.ride_quality_score}/100 ride quality for a {best.trip_duration}-day trip "
-        f"starting {best.best_start_day}. {best.trip_explanation}"
+        f"{period}. {best.trip_explanation}"
     )
 
 
-def _opportunities(results: list[DestinationResult]) -> list[dict[str, Any]]:
+def _opportunities(
+    results: list[DestinationResult],
+    planning_profile: TripPlanningProfile,
+    config: dict[str, Any],
+    forecast_days: int,
+    trip_duration: TripDurationSelection,
+    window_preferences: WindowPreferences,
+    active_helpers: dict[str, str | None],
+) -> list[dict[str, Any]]:
     opportunities: list[dict[str, Any]] = []
     for result in results:
         if not result.reachable or result.route is None:
             continue
         for window in result.all_trip_windows:
-            experience = calculate_ride_experience(result.destination, result.route, window, result.forecasts)
-            opportunities.append(
-                {
-                    "destination": result.destination.name,
-                    "start_date": window.start_day,
-                    "end_date": window.end_day,
-                    "duration_days": window.duration_days,
-                    "trip_score": window.trip_score,
-                    "ride_quality_score": experience.ride_quality_score,
-                    "weather_score": experience.weather_score,
-                    "stability_score": window.weather_stability_score,
-                    "traffic_score": experience.traffic_score,
-                    "traffic_level": _pressure_level(experience.traffic_score),
-                    "tourism_pressure_score": experience.tourism_pressure_score,
-                    "tourism_level": _pressure_level(experience.tourism_pressure_score),
-                    "holiday_pressure_score": experience.holiday_pressure_score,
-                    "holiday_score": experience.holiday_score,
-                    "access_score": experience.access_score,
-                    "motorcycle_access_score": experience.motorcycle_access_score,
-                    "access_status": _access_status(experience.motorcycle_access_score),
-                    "distance_score": experience.distance_score,
-                    "temperature_score": experience.temperature_score,
-                    "road_fun_score": experience.road_fun_score,
-                    "holiday_names": experience.holiday_names,
-                    "access_notes": experience.access_notes,
-                    "route_distance_km": result.route.distance_km,
-                    "estimated_travel_time": _format_minutes(result.route.travel_time_minutes),
-                    "daily_scores": window.daily_scores,
-                    "verdict": _window_verdict(experience.ride_quality_score, _is_weekend_window(window)),
-                    "explanation": f"{window.trip_explanation} {experience.explanation}",
-                    "window_type": "weekend" if _is_weekend_window(window) else "weekday",
-                    "days_until": _days_until(window.start_day),
-                }
+            experience = calculate_ride_experience(
+                result.destination,
+                result.route,
+                window,
+                result.forecasts,
+                planning_profile,
             )
-    return sorted(opportunities, key=lambda item: (-int(item["ride_quality_score"]), str(item["start_date"])))
+            if experience.exclusion_reasons:
+                continue
+            opportunity = {
+                "destination": result.destination.name,
+                "start_date": window.start_day,
+                "end_date": window.end_day,
+                "start_date_display": _format_date(window.start_day),
+                "end_date_display": _format_date(window.end_day),
+                "period": _format_period(window.start_day, window.end_day),
+                "duration_days": window.duration_days,
+                "trip_score": window.trip_score,
+                "ride_quality_score": experience.ride_quality_score,
+                "weather_score": experience.weather_score,
+                "stability_score": window.weather_stability_score,
+                "traffic_score": experience.traffic_score,
+                "traffic_level": _pressure_level(experience.traffic_score),
+                "tourism_pressure_score": experience.tourism_pressure_score,
+                "tourism_level": _pressure_level(experience.tourism_pressure_score),
+                "holiday_pressure_score": experience.holiday_pressure_score,
+                "holiday_score": experience.holiday_score,
+                "access_score": experience.access_score,
+                "motorcycle_access_score": experience.motorcycle_access_score,
+                "access_status": _access_status(experience.motorcycle_access_score),
+                "distance_score": experience.distance_score,
+                "temperature_score": experience.temperature_score,
+                "trip_efficiency_score": experience.trip_efficiency_score,
+                "travel_strategy": experience.travel_strategy,
+                "approach_time_hours": experience.approach_time_hours,
+                "return_time_hours": experience.return_time_hours,
+                "total_available_time_hours": experience.total_available_time_hours,
+                "estimated_destination_ride_time_hours": experience.estimated_destination_ride_time_hours,
+                "approach_enjoyment_factor": experience.approach_enjoyment_factor,
+                "destination_ride_time_ratio": experience.destination_ride_time_ratio,
+                "score_breakdown": _score_breakdown(experience, window),
+                "recommendation_reason": _recommendation_reason(result.destination.name, experience, window),
+                "tradeoffs": _tradeoffs(experience, window),
+                "road_fun_score": experience.road_fun_score,
+                "holiday_names": experience.holiday_names,
+                "access_notes": experience.access_notes,
+                "access_warnings": experience.access_warnings,
+                "known_restrictions": experience.known_restrictions,
+                "exclusion_reasons": experience.exclusion_reasons,
+                "route_distance_km": result.route.distance_km,
+                "estimated_travel_time": _format_minutes(result.route.travel_time_minutes),
+                "daily_scores": window.daily_scores,
+                "verdict": _window_verdict(experience.ride_quality_score, _is_weekend_window(window)),
+                "explanation": f"{window.trip_explanation} {experience.explanation}",
+                "window_type": "weekend" if _is_weekend_window(window) else "weekday",
+                "days_until": _days_until(window.start_day),
+            }
+            opportunity["decision_trace"] = _decision_trace(
+                opportunity,
+                result,
+                config,
+                forecast_days,
+                trip_duration,
+                planning_profile,
+                window_preferences,
+                active_helpers,
+            )
+            opportunities.append(opportunity)
+    return opportunities
+
+
+def _ranked_opportunities(opportunities: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ranked = sorted(
+        opportunities,
+        key=lambda item: (
+            -int(item["ride_quality_score"]),
+            -int(item["trip_efficiency_score"]),
+            -int(item["weather_score"]),
+            -int(item["stability_score"]),
+            -int(item["holiday_pressure_score"]),
+            -int(item["distance_score"]),
+            str(item["start_date"]),
+        ),
+    )
+    for rank, opportunity in enumerate(ranked, start=1):
+        trace = opportunity.get("decision_trace")
+        if isinstance(trace, dict):
+            trace.setdefault("result", {})["rank"] = rank
+    return ranked
+
+
+def _top_opportunities(
+    opportunities: list[dict[str, Any]],
+    max_days_until: int | None = None,
+    minimum_score: int = 70,
+    limit: int = 3,
+) -> list[dict[str, Any]]:
+    top = [
+        opportunity
+        for opportunity in opportunities
+        if int(opportunity["ride_quality_score"]) >= minimum_score
+        and (
+            max_days_until is None
+            or (opportunity.get("days_until") is not None and opportunity["days_until"] <= max_days_until)
+        )
+    ]
+    return top[:limit]
+
+
+def _disabled_destinations(config: dict[str, Any]) -> list[dict[str, str]]:
+    enabled_names = {destination.name for destination in destinations_from_config(config)}
+    return [
+        {
+            "destination": destination.name,
+            "reason": "disabled",
+            "details": "Destination is disabled in RideRadar options.",
+        }
+        for destination in all_destinations_for_options(config)
+        if destination.name not in enabled_names
+    ]
+
+
+def _excluded_destinations(results: list[DestinationResult]) -> list[dict[str, str]]:
+    excluded: list[dict[str, str]] = []
+    for result in results:
+        if result.ride_quality_score is not None:
+            continue
+        reason = result.exclusion_reasons[0] if result.exclusion_reasons else "no_valid_opportunity"
+        excluded.append(
+            {
+                "destination": result.destination.name,
+                "reason": reason,
+                "details": _exclusion_details(reason, result),
+            }
+        )
+    return excluded
+
+
+def _result_exclusion_reasons(
+    forecasts: list[Any],
+    windows: list[Any],
+    ride_experiences: list[tuple[Any, Any]],
+    window_preferences: WindowPreferences,
+) -> list[str]:
+    if not forecasts:
+        return ["no_forecast_data"]
+    if not windows:
+        if window_preferences.weekend_only:
+            return ["weekend_only_filter"]
+        if window_preferences.preferred_start_weekday is not None:
+            return ["preferred_start_day_filter"]
+        return ["no_complete_window"]
+    reasons = [
+        reason
+        for _, experience in ride_experiences
+        for reason in experience.exclusion_reasons
+    ]
+    if not reasons:
+        return []
+    return sorted(set(_canonical_exclusion_reason(reason) for reason in reasons))
+
+
+def _canonical_exclusion_reason(reason: str) -> str:
+    normalized = reason.casefold()
+    if "trailer" in normalized and "not available" in normalized:
+        return "trailer_required_but_unavailable"
+    if "trailer" in normalized and "disabled" in normalized:
+        return "trailer_disabled"
+    if "max travel effort" in normalized:
+        return "approach_time_too_high"
+    return "insufficient_destination_ride_time"
+
+
+def _exclusion_details(reason: str, result: DestinationResult) -> str:
+    details = {
+        "too_far": result.explanation,
+        "no_forecast_data": "No forecast data was returned for this destination.",
+        "no_complete_window": "No complete weather window matches the selected duration.",
+        "weekend_only_filter": "No evaluated window matched the weekend-only filter.",
+        "preferred_start_day_filter": "No evaluated window matched the preferred start day.",
+        "trailer_required_but_unavailable": "Trailer strategy is selected, but the trailer availability helper is off.",
+        "trailer_disabled": "Trailer transport is selected, but trailer support is disabled in RideRadar options.",
+        "approach_time_too_high": "Approach time exceeds the configured maximum travel effort.",
+        "insufficient_destination_ride_time": "Too little useful destination riding time remains for this trip type.",
+    }
+    return details.get(reason, result.explanation)
+
+
+def _decision_trace(
+    opportunity: dict[str, Any],
+    result: DestinationResult,
+    config: dict[str, Any],
+    forecast_days: int,
+    trip_duration: TripDurationSelection,
+    planning_profile: TripPlanningProfile,
+    window_preferences: WindowPreferences,
+    active_helpers: dict[str, str | None],
+) -> dict[str, Any]:
+    return {
+        "inputs": {
+            "start_location": str(config.get("start_address", "redacted")),
+            "destination": result.destination.name,
+            "travel_strategy": planning_profile.travel_strategy,
+            "duration_days": opportunity["duration_days"],
+            "duration_mode": trip_duration.mode,
+            "min_duration_days": trip_duration.min_days,
+            "max_duration_days": trip_duration.max_days,
+            "forecast_horizon_days": forecast_days,
+            "weekend_only": window_preferences.weekend_only,
+            "preferred_start_day": _weekday_name(window_preferences.preferred_start_weekday),
+            "trailer_support_enabled": planning_profile.trailer_support_enabled,
+            "trailer_available": planning_profile.trailer_available,
+            "available_hours_per_day": planning_profile.available_hours_per_day,
+            "max_approach_time_hours": planning_profile.max_approach_time_hours,
+            "helper_overrides": active_helpers,
+        },
+        "window": {
+            "start_date": opportunity["start_date"],
+            "end_date": opportunity["end_date"],
+            "period": opportunity["period"],
+        },
+        "scores": opportunity["score_breakdown"],
+        "penalties": _trace_penalties(opportunity),
+        "boosts": _trace_boosts(opportunity),
+        "result": {
+            "rank": None,
+            "recommendation_reason": opportunity["recommendation_reason"],
+        },
+    }
+
+
+def _trace_penalties(opportunity: dict[str, Any]) -> list[dict[str, Any]]:
+    penalties: list[dict[str, Any]] = []
+    if int(opportunity["trip_efficiency_score"]) < 80:
+        penalties.append(
+            {
+                "name": "trip_efficiency",
+                "value": int(opportunity["trip_efficiency_score"]) - 80,
+                "reason": "Travel effort reduces useful destination riding time.",
+            }
+        )
+    if int(opportunity["holiday_pressure_score"]) < 80:
+        penalties.append(
+            {
+                "name": "holiday_pressure",
+                "value": int(opportunity["holiday_pressure_score"]) - 80,
+                "reason": "Holiday or long-weekend pressure may make scenic routes busier.",
+            }
+        )
+    if int(opportunity["access_score"]) < 80:
+        penalties.append(
+            {
+                "name": "access",
+                "value": int(opportunity["access_score"]) - 80,
+                "reason": "Known regional motorcycle restriction risk affects this window.",
+            }
+        )
+    return penalties
+
+
+def _trace_boosts(opportunity: dict[str, Any]) -> list[dict[str, Any]]:
+    boosts: list[dict[str, Any]] = []
+    if opportunity["travel_strategy"] == "motorcycle_scenic":
+        boosts.append(
+            {
+                "name": "scenic_approach",
+                "value": round(float(opportunity["approach_enjoyment_factor"]) * 10),
+                "reason": "Motorcycle scenic approach makes approach time partially enjoyable.",
+            }
+        )
+    if int(opportunity["stability_score"]) >= 85:
+        boosts.append(
+            {
+                "name": "stable_weather",
+                "value": 3,
+                "reason": "Forecast consistency is high across the complete window.",
+            }
+        )
+    return boosts
+
+
+def _best_debug_summary(best: DestinationResult | None) -> str:
+    if best is None:
+        return "none"
+    return f"{best.destination.name} {best.ride_quality_score}/100"
 
 
 def _best_matching_opportunity(opportunities: list[dict[str, Any]], window_type: str) -> dict[str, Any] | None:
-    return next((opportunity for opportunity in opportunities if opportunity["window_type"] == window_type), None)
+    hero = opportunities[0] if opportunities else None
+    return next(
+        (
+            opportunity
+            for opportunity in opportunities
+            if opportunity["window_type"] == window_type and not _same_opportunity(opportunity, hero)
+        ),
+        None,
+    )
+
+
+def _same_opportunity(left: dict[str, Any] | None, right: dict[str, Any] | None) -> bool:
+    if not left or not right:
+        return False
+    return (
+        left.get("destination") == right.get("destination")
+        and left.get("start_date") == right.get("start_date")
+        and left.get("end_date") == right.get("end_date")
+        and left.get("duration_days") == right.get("duration_days")
+    )
 
 
 def _is_weekend_window(window: Any) -> bool:
@@ -343,11 +762,337 @@ def _days_until(start_day: str) -> int | None:
     return max(0, (start - datetime.now().date()).days)
 
 
+def _trip_duration_selection(
+    config: dict[str, Any],
+    forecast_days: int,
+    hass: HomeAssistant | None = None,
+) -> TripDurationSelection:
+    config_duration = _trip_duration_from_config(config, forecast_days)
+    mode = str(config.get(CONF_DURATION_MODE, DEFAULT_DURATION_MODE))
+    source = "config"
+    if str(config.get(CONF_PREFERRED_TRIP_DURATION, DEFAULT_PREFERRED_TRIP_DURATION)) == "flexible":
+        mode = "flexible"
+
+    number_duration = _helper_number_duration(hass, forecast_days)
+    select_value = _helper_select_value(hass)
+    if select_value is not None:
+        source = TRIP_DURATION_SELECT_ENTITY
+        normalized = _normalize_duration_select(select_value)
+        if normalized == "flexible":
+            mode = "flexible"
+            config_duration = number_duration or config_duration
+        elif normalized == "custom":
+            config_duration = number_duration or config_duration
+            mode = "fixed"
+            source = f"{TRIP_DURATION_SELECT_ENTITY}+{TRIP_DURATION_NUMBER_ENTITY}"
+        elif normalized is not None:
+            config_duration = normalized
+            mode = "fixed"
+    elif number_duration is not None:
+        config_duration = number_duration
+        mode = "fixed"
+        source = TRIP_DURATION_NUMBER_ENTITY
+
+    if mode not in {"fixed", "flexible"}:
+        mode = "fixed"
+    max_supported = max(MIN_TRIP_DURATION_DAYS, min(forecast_days, MAX_FORECAST_DAYS))
+    max_days = max(MIN_TRIP_DURATION_DAYS, min(int(config_duration), max_supported))
+    min_days = MIN_TRIP_DURATION_DAYS if mode == "flexible" else max_days
+    return TripDurationSelection(mode=mode, min_days=min_days, max_days=max_days, source=source)
+
+
+def _forecast_days_selection(config: dict[str, Any], hass: HomeAssistant | None = None) -> int:
+    configured = int(config.get(CONF_FORECAST_DAYS, DEFAULT_FORECAST_DAYS))
+    helper_value = _helper_state(hass, FORECAST_HORIZON_ENTITY)
+    if helper_value is not None:
+        try:
+            configured = round(float(helper_value))
+        except ValueError:
+            pass
+    return max(MIN_TRIP_DURATION_DAYS, min(configured, MAX_FORECAST_DAYS))
+
+
+def _window_preferences(hass: HomeAssistant | None = None) -> WindowPreferences:
+    return WindowPreferences(
+        weekend_only=_helper_bool(hass, WEEKEND_ONLY_ENTITY, False),
+        preferred_start_weekday=_normalize_weekday(_helper_state(hass, PREFERRED_START_DAY_ENTITY)),
+    )
+
+
+def _matches_window_preferences(window: Any, preferences: WindowPreferences) -> bool:
+    if preferences.weekend_only and not _is_weekend_window(window):
+        return False
+    if preferences.preferred_start_weekday is None:
+        return True
+    try:
+        start = date.fromisoformat(window.start_day)
+    except ValueError:
+        return True
+    return start.weekday() == preferences.preferred_start_weekday
+
+
+def _normalize_weekday(value: str | None) -> int | None:
+    if value is None:
+        return None
+    normalized = value.strip().casefold()
+    if normalized in {"any", "flexible", "geen voorkeur", "no preference"}:
+        return None
+    weekdays = {
+        "monday": 0,
+        "maandag": 0,
+        "mon": 0,
+        "ma": 0,
+        "tuesday": 1,
+        "dinsdag": 1,
+        "tue": 1,
+        "di": 1,
+        "wednesday": 2,
+        "woensdag": 2,
+        "wed": 2,
+        "wo": 2,
+        "thursday": 3,
+        "donderdag": 3,
+        "thu": 3,
+        "do": 3,
+        "friday": 4,
+        "vrijdag": 4,
+        "fri": 4,
+        "vr": 4,
+        "saturday": 5,
+        "zaterdag": 5,
+        "sat": 5,
+        "za": 5,
+        "sunday": 6,
+        "zondag": 6,
+        "sun": 6,
+        "zo": 6,
+    }
+    return weekdays.get(normalized)
+
+
 def _trip_duration_from_config(config: dict[str, Any], forecast_days: int) -> int:
     preferred = str(config.get(CONF_PREFERRED_TRIP_DURATION, DEFAULT_PREFERRED_TRIP_DURATION))
-    if preferred == "custom":
+    if preferred == "flexible":
+        duration = int(config.get(CONF_CUSTOM_TRIP_DURATION_DAYS, DEFAULT_CUSTOM_TRIP_DURATION_DAYS))
+    elif preferred == "custom":
         duration = int(config.get(CONF_CUSTOM_TRIP_DURATION_DAYS, DEFAULT_CUSTOM_TRIP_DURATION_DAYS))
     else:
         duration = int(preferred)
     max_supported = max(MIN_TRIP_DURATION_DAYS, min(forecast_days, MAX_FORECAST_DAYS))
     return max(MIN_TRIP_DURATION_DAYS, min(duration, max_supported))
+
+
+def _helper_number_duration(hass: HomeAssistant | None, forecast_days: int) -> int | None:
+    if hass is None:
+        return None
+    state = hass.states.get(TRIP_DURATION_NUMBER_ENTITY)
+    if state is None or state.state in {"unknown", "unavailable", ""}:
+        return None
+    try:
+        duration = round(float(state.state))
+    except ValueError:
+        return None
+    max_supported = max(MIN_TRIP_DURATION_DAYS, min(forecast_days, MAX_FORECAST_DAYS))
+    return max(MIN_TRIP_DURATION_DAYS, min(duration, max_supported))
+
+
+def _helper_select_value(hass: HomeAssistant | None) -> str | None:
+    if hass is None:
+        return None
+    state = hass.states.get(TRIP_DURATION_SELECT_ENTITY)
+    if state is None or state.state in {"unknown", "unavailable", ""}:
+        return None
+    return state.state
+
+
+def _active_helper_states(hass: HomeAssistant | None) -> dict[str, str | None]:
+    helper_ids = (
+        TRIP_DURATION_NUMBER_ENTITY,
+        TRIP_DURATION_SELECT_ENTITY,
+        TRAVEL_STRATEGY_SELECT_ENTITY,
+        TRAILER_AVAILABLE_ENTITY,
+        AVAILABLE_HOURS_ENTITY,
+        MAX_APPROACH_TIME_ENTITY,
+        FORECAST_HORIZON_ENTITY,
+        WEEKEND_ONLY_ENTITY,
+        PREFERRED_START_DAY_ENTITY,
+    )
+    return {entity_id: _helper_state(hass, entity_id) for entity_id in helper_ids}
+
+
+def _trip_planning_profile(config: dict[str, Any], hass: HomeAssistant | None = None) -> TripPlanningProfile:
+    strategy = _normalize_travel_strategy(_helper_state(hass, TRAVEL_STRATEGY_SELECT_ENTITY)) or str(
+        config.get("travel_strategy", DEFAULT_TRAVEL_STRATEGY)
+    )
+    if strategy not in TRAVEL_STRATEGY_OPTIONS:
+        strategy = TRAVEL_STRATEGY_MOTORCYCLE_DIRECT
+    trailer_support_enabled = _as_bool(
+        config.get(CONF_TRAILER_SUPPORT_ENABLED, DEFAULT_TRAILER_SUPPORT_ENABLED),
+        DEFAULT_TRAILER_SUPPORT_ENABLED,
+    )
+    return TripPlanningProfile(
+        travel_strategy=strategy,
+        available_hours_per_day=_helper_float(
+            hass,
+            AVAILABLE_HOURS_ENTITY,
+            DEFAULT_AVAILABLE_HOURS_PER_DAY,
+            minimum=1.0,
+            maximum=18.0,
+        ),
+        max_approach_time_hours=_helper_float(
+            hass,
+            MAX_APPROACH_TIME_ENTITY,
+            DEFAULT_MAX_APPROACH_TIME_HOURS,
+            minimum=0.5,
+            maximum=12.0,
+        ),
+        trailer_support_enabled=trailer_support_enabled,
+        trailer_available=trailer_support_enabled and _helper_bool(hass, TRAILER_AVAILABLE_ENTITY, False),
+    )
+
+
+def _helper_state(hass: HomeAssistant | None, entity_id: str) -> str | None:
+    if hass is None:
+        return None
+    state = hass.states.get(entity_id)
+    if state is None or state.state in {"unknown", "unavailable", ""}:
+        return None
+    return state.state
+
+
+def _helper_float(
+    hass: HomeAssistant | None,
+    entity_id: str,
+    default: float,
+    minimum: float,
+    maximum: float,
+) -> float:
+    value = _helper_state(hass, entity_id)
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+    except ValueError:
+        return default
+    return max(minimum, min(parsed, maximum))
+
+
+def _helper_bool(hass: HomeAssistant | None, entity_id: str, default: bool) -> bool:
+    value = _helper_state(hass, entity_id)
+    if value is None:
+        return default
+    return _as_bool(value, default)
+
+
+def _as_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in {"on", "true", "yes", "1"}:
+            return True
+        if normalized in {"off", "false", "no", "0"}:
+            return False
+    return default
+
+
+def _normalize_travel_strategy(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().casefold().replace("-", " ").replace("_", " ")
+    if normalized in {"motorcycle direct", "direct", "motor direct", "motorcycle"}:
+        return "motorcycle_direct"
+    if normalized in {"motorcycle scenic", "scenic", "scenic approach", "motorcycle scenic approach"}:
+        return "motorcycle_scenic"
+    if normalized in {"trailer", "trailer transport", "car trailer"}:
+        return "trailer"
+    return None
+
+
+def _normalize_duration_select(value: str) -> int | str | None:
+    normalized = value.strip().casefold().replace("_", " ").replace("-", " ")
+    if normalized in {"flexible", "flexibel"}:
+        return "flexible"
+    if normalized == "custom":
+        return "custom"
+    for duration in range(1, MAX_FORECAST_DAYS + 1):
+        if normalized in {str(duration), f"{duration} day", f"{duration} days", f"{duration} dagen"}:
+            return duration
+    return None
+
+
+def _format_date(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        return value
+    return f"{_weekday_label(parsed)} {parsed.strftime('%d-%m-%Y')}"
+
+
+def _format_period(start_value: str | None, end_value: str | None) -> str:
+    start = _format_date(start_value)
+    end = _format_date(end_value)
+    if start and end:
+        return f"{start} t/m {end}"
+    return start or end or "unknown period"
+
+
+def _score_breakdown(experience: Any, window: Any) -> dict[str, int]:
+    return {
+        "weather_score": experience.weather_score,
+        "stability_score": window.weather_stability_score,
+        "temperature_score": experience.temperature_score,
+        "distance_score": experience.distance_score,
+        "holiday_pressure_score": experience.holiday_pressure_score,
+        "access_score": experience.access_score,
+        "trip_efficiency_score": experience.trip_efficiency_score,
+        "ride_quality_score": experience.ride_quality_score,
+    }
+
+
+def _recommendation_reason(destination: str, experience: Any, window: Any) -> str:
+    if experience.ride_quality_score >= 85:
+        quality = "strongest complete trip window"
+    elif experience.ride_quality_score >= 70:
+        quality = "best balanced available window"
+    else:
+        quality = "least compromised available window"
+    return (
+        f"{destination} is the {quality}: weather {experience.weather_score}/100, "
+        f"stability {window.weather_stability_score}/100, distance {experience.distance_score}/100, "
+        f"holiday pressure {experience.holiday_pressure_score}/100, access {experience.access_score}/100, "
+        f"trip efficiency {experience.trip_efficiency_score}/100."
+    )
+
+
+def _tradeoffs(experience: Any, window: Any) -> list[str]:
+    tradeoffs: list[str] = []
+    if experience.weather_score < 80:
+        tradeoffs.append(f"Weather is only {experience.weather_score}/100 for this window.")
+    if window.weather_stability_score < 80:
+        tradeoffs.append(f"Forecast stability is {window.weather_stability_score}/100, so one day may be weaker.")
+    if experience.temperature_score < 80:
+        tradeoffs.append(f"Temperature comfort scores {experience.temperature_score}/100.")
+    if experience.distance_score < 80:
+        tradeoffs.append(f"Distance scores {experience.distance_score}/100 and may be a longer transfer.")
+    if experience.trip_efficiency_score < 80:
+        tradeoffs.append(
+            f"Trip efficiency scores {experience.trip_efficiency_score}/100; too much time may be spent getting there."
+        )
+    if experience.holiday_pressure_score < 80:
+        tradeoffs.append(f"Holiday pressure scores {experience.holiday_pressure_score}/100.")
+    if experience.access_score < 80:
+        tradeoffs.append(f"Access scores {experience.access_score}/100; check local route restrictions.")
+    return tradeoffs or ["No major trade-offs detected in the current forecast window."]
+
+
+def _weekday_label(value: date) -> str:
+    return ("Ma", "Di", "Wo", "Do", "Vr", "Za", "Zo")[value.weekday()]
+
+
+def _weekday_name(value: int | None) -> str:
+    if value is None:
+        return "any"
+    return ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")[value]

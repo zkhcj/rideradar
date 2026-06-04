@@ -214,6 +214,30 @@ async def test_config_flow_saves_custom_trip_duration(hass, monkeypatch) -> None
     assert result["data"][CONF_CUSTOM_TRIP_DURATION_DAYS] == 4
 
 
+async def test_config_flow_saves_flexible_trip_duration(hass, monkeypatch) -> None:
+    _patch_setup(monkeypatch)
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+        data={CONF_START_ADDRESS: "Brussels"},
+    )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input=_settings_input(
+            **{
+                CONF_FORECAST_DAYS: 5,
+                CONF_PREFERRED_TRIP_DURATION: "flexible",
+                CONF_CUSTOM_TRIP_DURATION_DAYS: 3,
+            }
+        ),
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_PREFERRED_TRIP_DURATION] == "flexible"
+    assert result["data"][CONF_CUSTOM_TRIP_DURATION_DAYS] == 3
+
+
 async def test_options_flow_shows_all_normal_settings_without_action_dropdown(hass, monkeypatch) -> None:
     _patch_setup(monkeypatch)
     entry = _entry()

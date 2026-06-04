@@ -30,6 +30,7 @@
           "custom_trip_duration_days": "Custom trip duration",
           "activity_profile": "Activity profile",
           "detour_factor": "Fallback route detour factor",
+          "trailer_support_enabled": "Enable trailer transport strategy",
           "enabled_default_destinations": "Enabled default destinations"
         }
       }
@@ -63,6 +64,7 @@
           "custom_trip_duration_days": "Custom trip duration",
           "activity_profile": "Activity profile",
           "detour_factor": "Fallback route detour factor",
+          "trailer_support_enabled": "Enable trailer transport strategy",
           "enabled_destinations": "Enabled destinations"
         }
       },
@@ -103,7 +105,8 @@
           "preferred_trip_duration": "Preferred trip duration",
           "custom_trip_duration_days": "Custom trip duration",
           "activity_profile": "Activity profile",
-          "detour_factor": "Fallback route detour factor"
+          "detour_factor": "Fallback route detour factor",
+          "trailer_support_enabled": "Enable trailer transport strategy"
         }
       },
       "destinations": {

@@ -1,8 +1,8 @@
 # RideRadar
 
-RideRadar automatically analyzes weather, forecast stability, trip duration, route distance, holidays, restriction risk, and riding opportunities to recommend the best motorcycle destinations within reach.
+RideRadar automatically analyzes weather, forecast stability, trip duration, route distance, travel effort, holidays, restriction risk, and riding opportunities to recommend motorcycle destinations that are actually worth riding.
 
-Stop checking ten different websites. Know where to ride before you leave the garage.
+RideRadar does not just tell you where the weather is good. It tells you where the ride is worth it.
 
 ![RideRadar dashboard hero](docs/images/rideradar-dashboard-hero.png)
 
@@ -19,7 +19,8 @@ RideRadar combines those signals into one Home Assistant recommendation:
 - why that destination is recommended
 - whether traffic or holidays will hurt the ride
 - whether motorcycle restrictions may affect the route
-- whether the destination is worth the travel distance
+- whether the destination is worth the travel effort
+- whether this week is good enough or a better forecast window is coming
 
 ## Ride Quality, Not Weather Alone
 
@@ -32,9 +33,10 @@ RideRadar exposes a rider-facing `ride_quality_score` built from:
 | Weather score | Dry, calm, comfortable riding conditions |
 | Stability score | Consistency across the complete trip |
 | Temperature score | Comfortable temperatures for riding gear |
-| Distance score | Whether the destination is worth the travel distance |
+| Distance score | Whether the destination is within a sensible range |
 | Holiday pressure score | Public holiday, school holiday, and long-weekend impact |
 | Access score | Motorcycle restriction and closure risk |
+| Trip efficiency score | How much useful riding time remains after approach and return travel |
 | Road fun score | Destination suitability for enjoyable motorcycle roads |
 
 Current holiday, access, traffic pressure, tourism pressure, and road-fun scoring is deterministic and offline-friendly. It uses destination profiles, public-holiday calculations, long-weekend detection, seasonality, and known regional motorcycle restriction risk. Future routing providers can replace these heuristics with live traffic and road closure data.
@@ -60,15 +62,87 @@ Current holiday, access, traffic pressure, tourism pressure, and road-fun scorin
 type: markdown
 title: RideRadar best trip
 content: >
+  {% set item = state_attr('sensor.rideradar_best_next_available_opportunity', 'opportunity') %}
   ## {{ states('sensor.rideradar_best_trip_destination') }}
 
   Ride quality: **{{ states('sensor.rideradar_best_ride_quality_score') }}/100**
 
-  Starts: **{{ states('sensor.rideradar_best_trip_start_day') }}**
+  Best window: **{{ item.period if item else 'unknown' }}**
 
-  Duration: **{{ states('sensor.rideradar_trip_duration') }} days**
+  Duration: **{{ state_attr('sensor.rideradar_trip_duration', 'duration_label') or states('sensor.rideradar_trip_duration') ~ ' days' }}**
 
   {{ states('sensor.rideradar_best_summary') }}
+```
+
+### Dashboard Duration Controls
+
+Create any helpers you want to control from the dashboard, then place them above the RideRadar cards.
+
+```yaml
+type: entities
+title: RideRadar controls
+entities:
+  - entity: input_select.rideradar_trip_duration
+    name: Trip duration
+  - entity: input_number.rideradar_trip_duration_days
+    name: Custom or flexible maximum days
+  - entity: input_number.rideradar_forecast_horizon_days
+    name: Forecast horizon
+  - entity: input_select.rideradar_preferred_start_day
+    name: Preferred start day
+  - entity: input_boolean.rideradar_weekend_only
+    name: Weekend only
+  - entity: input_select.rideradar_travel_strategy
+    name: Travel strategy
+  - entity: input_boolean.rideradar_trailer_available
+    name: Trailer available
+  - entity: input_number.rideradar_available_hours_per_day
+    name: Available hours per day
+  - entity: input_number.rideradar_max_approach_time_hours
+    name: Max approach time
+```
+
+Supported `input_select.rideradar_trip_duration` values include `1 day`, `2 days`, `3 days`, `flexible`, and `custom`.
+`input_number.rideradar_trip_duration_days` is read dynamically on every RideRadar refresh.
+Supported `input_select.rideradar_travel_strategy` values include `Motorcycle Direct`, `Motorcycle Scenic Approach`, and `Trailer Transport`.
+Trailer recommendations only appear when trailer support is enabled in configuration and `input_boolean.rideradar_trailer_available` is on.
+
+### This Week: Top 3
+
+```yaml
+type: markdown
+title: RideRadar this week
+content: >
+  {% set windows = state_attr('sensor.rideradar_top_week_opportunities', 'opportunities') or [] %}
+  {% if windows %}
+  {% for item in windows %}
+  {{ loop.index }}. **{{ item.destination }}**
+  {{ item.ride_quality_score }}/100
+  {{ item.period }}
+
+  {% endfor %}
+  {% else %}
+  No 70+ RideRadar opportunities start within the next 7 days.
+  {% endif %}
+```
+
+### Best Later In Forecast
+
+```yaml
+type: markdown
+title: RideRadar best upcoming
+content: >
+  {% set windows = state_attr('sensor.rideradar_top_month_opportunities', 'opportunities') or [] %}
+  {% if windows %}
+  {% for item in windows %}
+  {{ loop.index }}. **{{ item.destination }}**
+  {{ item.ride_quality_score }}/100
+  {{ item.period }}
+
+  {% endfor %}
+  {% else %}
+  No 70+ RideRadar opportunities are available in the configured forecast horizon.
+  {% endif %}
 ```
 
 ### Top 5 Reachable Destinations
@@ -78,10 +152,10 @@ type: markdown
 title: RideRadar ranking
 content: >
   {% set windows = state_attr('sensor.rideradar_best_opportunities', 'opportunities') or [] %}
-  | Destination | Score | Distance | Traffic | Access |
-  | --- | ---: | ---: | --- | --- |
+  | Destination | Score | Efficiency | Distance | Access |
+  | --- | ---: | ---: | ---: | --- |
   {% for item in windows[:5] %}
-  | {{ item.destination }} | {{ item.ride_quality_score }} | {{ item.route_distance_km | round(0) }} km | {{ item.traffic_level }} | {{ item.access_status }} |
+  | {{ item.destination }} | {{ item.ride_quality_score }}/100 | {{ item.trip_efficiency_score }}/100 | {{ item.route_distance_km | round(0) }} km | {{ item.access_status or 'Unknown' }} |
   {% endfor %}
 ```
 
@@ -93,7 +167,7 @@ title: RideRadar availability
 content: >
   {% set windows = state_attr('sensor.rideradar_best_opportunities', 'opportunities') or [] %}
   {% for item in windows[:5] %}
-  - **{{ item.destination }}** from {{ item.start_date }} to {{ item.end_date }}:
+  - **{{ item.destination }}** {{ item.period }}:
     {{ item.ride_quality_score }}/100, {{ item.verdict }}
   {% endfor %}
 ```
@@ -106,9 +180,11 @@ title: Best weekend ride
 content: >
   {% set item = state_attr('sensor.rideradar_best_weekend_opportunity', 'opportunity') %}
   {% if item %}
-  **{{ item.destination }}** from {{ item.start_date }} to {{ item.end_date }}
+  **{{ item.destination }}** {{ item.period }}
 
   Ride quality: **{{ item.ride_quality_score }}/100**
+
+  Why: {{ item.recommendation_reason }}
 
   {{ item.explanation }}
   {% else %}
@@ -127,8 +203,8 @@ content: >
   Sauerland best upcoming score:
   **{{ states('sensor.rideradar_sauerland_best_future_window') }}/100**
 
-  Starts in:
-  **{{ state_attr('sensor.rideradar_sauerland_best_future_window', 'days_until') }} days**
+  Window:
+  **{{ state_attr('sensor.rideradar_sauerland_best_future_window', 'period') or 'unknown' }}**
 
   {{ state_attr('sensor.rideradar_sauerland_best_future_window', 'explanation') }}
 ```
@@ -140,18 +216,73 @@ type: markdown
 title: Sauerland detail
 content: >
   {% set e = 'sensor.rideradar_sauerland' %}
+  {% set breakdown = state_attr(e, 'score_breakdown') or {} %}
   Ride quality: **{{ state_attr(e, 'ride_quality_score') }}/100**
 
-  Traffic: **{{ state_attr(e, 'ride_experience').traffic_score }}/100**
+  Weather: **{{ breakdown.weather_score | default('unknown') }}/100**
 
-  Access: **{{ state_attr(e, 'ride_experience').access_score }}/100**
+  Stability: **{{ breakdown.stability_score | default('unknown') }}/100**
 
-  Stability: **{{ state_attr(e, 'weather_stability_score') }}/100**
+  Temperature: **{{ breakdown.temperature_score | default('unknown') }}/100**
+
+  Distance: **{{ breakdown.distance_score | default('unknown') }}/100**
+
+  Holiday pressure: **{{ breakdown.holiday_pressure_score | default('unknown') }}/100**
+
+  Access: **{{ breakdown.access_score | default('unknown') }}/100**
+
+  Trip efficiency: **{{ breakdown.trip_efficiency_score | default('unknown') }}/100**
+
+  Why: {{ state_attr(e, 'recommendation_reason') or 'No explanation available yet.' }}
 
   {{ state_attr(e, 'trip_explanation') }}
 
-  Daily scores:
-  {{ state_attr(e, 'daily_scores') }}
+  Trade-offs:
+  {% for tradeoff in state_attr(e, 'tradeoffs') or [] %}
+  - {{ tradeoff }}
+  {% endfor %}
+```
+
+### Optional Debug Card
+
+Use this while testing RideRadar decisions. It shows the selected scenario, the best score, the top exclusion reason, and the score breakdown.
+
+```yaml
+type: markdown
+title: RideRadar debug
+content: >
+  {% set summary = 'sensor.rideradar_best_summary' %}
+  {% set duration = 'sensor.rideradar_trip_duration' %}
+  {% set trace = state_attr(summary, 'best_decision_trace') or {} %}
+  {% set inputs = trace.inputs or {} %}
+  {% set breakdown = trace.scores or {} %}
+
+  Travel strategy: **{{ inputs.travel_strategy | default('unknown') }}**
+
+  Trailer available: **{{ inputs.trailer_available | default('unknown') }}**
+
+  Duration: **{{ state_attr(duration, 'duration_label') or states(duration) ~ ' days' }}**
+
+  Forecast horizon: **{{ inputs.forecast_horizon_days | default('unknown') }} days**
+
+  Weekend only: **{{ inputs.weekend_only | default('unknown') }}**
+
+  Preferred start day: **{{ inputs.preferred_start_day | default('any') }}**
+
+  Best destination: **{{ states('sensor.rideradar_best_trip_destination') }}**
+
+  Best score: **{{ states('sensor.rideradar_best_ride_quality_score') }}/100**
+
+  Top exclusion reason: **{{ state_attr(summary, 'top_exclusion_reason') or 'none' }}**
+
+  Scores:
+  - Weather: {{ breakdown.weather_score | default('unknown') }}/100
+  - Stability: {{ breakdown.stability_score | default('unknown') }}/100
+  - Temperature: {{ breakdown.temperature_score | default('unknown') }}/100
+  - Distance: {{ breakdown.distance_score | default('unknown') }}/100
+  - Holiday pressure: {{ breakdown.holiday_pressure_score | default('unknown') }}/100
+  - Access: {{ breakdown.access_score | default('unknown') }}/100
+  - Trip efficiency: {{ breakdown.trip_efficiency_score | default('unknown') }}/100
 ```
 
 ## Availability Windows
@@ -167,11 +298,13 @@ Example with a 2-day trip duration and 7-day forecast horizon:
 - Friday-Saturday
 - Saturday-Sunday
 
-Each window includes destination, start date, end date, duration, ride quality score, weather score, stability score, traffic score, tourism pressure score, holiday score, motorcycle access score, route distance, travel time, daily scores, verdict, and explanation.
+Each window includes destination, start date, end date, readable period, duration, ride quality score, weather score, stability score, temperature score, distance score, holiday pressure score, access score, trip efficiency score, travel strategy, route distance, travel time, daily scores, verdict, explanation, recommendation reason, trade-offs, and score breakdown.
 
 Summary sensors:
 
 - `sensor.rideradar_best_opportunities`
+- `sensor.rideradar_top_week_opportunities`
+- `sensor.rideradar_top_month_opportunities`
 - `sensor.rideradar_best_weekend_opportunity`
 - `sensor.rideradar_best_weekday_opportunity`
 - `sensor.rideradar_best_next_available_opportunity`
@@ -197,8 +330,21 @@ Example opportunity attribute:
 destination: Sauerland
 start_date: "2026-05-14"
 end_date: "2026-05-15"
+start_date_display: "Do 14-05-2026"
+end_date_display: "Vr 15-05-2026"
+period: "Do 14-05-2026 t/m Vr 15-05-2026"
 ride_quality_score: 78
 weather_score: 95
+stability_score: 88
+temperature_score: 84
+distance_score: 80
+trip_efficiency_score: 89
+travel_strategy: "motorcycle_direct"
+approach_time_hours: 1.5
+return_time_hours: 1.5
+total_available_time_hours: 16.0
+estimated_destination_ride_time_hours: 13.0
+destination_ride_time_ratio: 0.812
 traffic_score: 62
 traffic_level: "Medium"
 tourism_pressure_score: 58
@@ -209,6 +355,18 @@ access_score: 86
 access_status: "Open"
 route_distance_km: 190
 verdict: "Good window"
+score_breakdown:
+  weather_score: 95
+  stability_score: 88
+  temperature_score: 84
+  distance_score: 80
+  holiday_pressure_score: 55
+  access_score: 86
+  trip_efficiency_score: 89
+  ride_quality_score: 78
+recommendation_reason: "Sauerland wins because it has the best balance of weather and trip practicality..."
+tradeoffs:
+  - "Holiday pressure score is 55/100."
 explanation: "Excellent weather, but Ascension Day creates long-weekend traffic pressure."
 ```
 
@@ -218,7 +376,44 @@ Each destination also gets a best-future-window sensor:
 - `sensor.rideradar_harz_best_future_window`
 - `sensor.rideradar_eifel_best_future_window`
 
-Attributes include `score`, `start_date`, `end_date`, `duration_days`, `days_until`, and `explanation`.
+Attributes include `current_score`, `best_future_score`, `best_future_window`, `score`, `start_date`, `end_date`, `start_date_display`, `end_date_display`, `period`, `duration_days`, `days_until`, `score_breakdown`, `recommendation_reason`, `tradeoffs`, and `explanation`.
+
+## Trip Efficiency And Travel Strategy
+
+RideRadar scores whether the destination still makes sense after approach and return travel.
+
+The selected travel strategy changes the ranking:
+
+- `motorcycle_direct`: approach riding counts partly as enjoyable riding.
+- `motorcycle_scenic`: approach time is longer, but more of it counts as ride enjoyment.
+- `trailer`: approach time does not count as motorcycle enjoyment and is only allowed when trailer support is enabled and the runtime trailer helper is on.
+
+Trip efficiency attributes include `approach_time_hours`, `return_time_hours`, `total_available_time_hours`, `estimated_destination_ride_time_hours`, `approach_enjoyment_factor`, `destination_ride_time_ratio`, and `trip_efficiency_score`.
+
+Interpretation:
+
+- 60%+ destination riding time: excellent
+- 45-60%: good
+- 30-45%: mediocre
+- below 30%: poor recommendation
+
+## GPX Roadmap
+
+RideRadar v1.0 prepares the architecture for route-based destinations with `RouteAnalysis` and `RouteBasedDestination` models. Full GPX upload and parsing is intentionally deferred until the region-based planner is stable.
+
+Planned GPX support will parse route points, calculate bounding boxes and midpoints, estimate route length, sample weather at multiple route points, and score the uploaded route as a selectable destination.
+
+## Diagnostics And Explainability
+
+RideRadar exposes compact decision traces in sensor attributes and fuller black-box data through Home Assistant diagnostics.
+
+Useful attributes:
+
+- `sensor.rideradar_best_summary`: `active_helpers`, `excluded_destinations`, `top_exclusion_reason`, `best_decision_trace`
+- `sensor.rideradar_best_opportunities`: ranked opportunities with `decision_trace`
+- destination sensors: `exclusion_reasons`, `score_breakdown`, `tradeoffs`, `recommendation_reason`
+
+Download diagnostics from the Home Assistant device/integration diagnostics flow when filing issues. Diagnostics include active helper states, enabled destinations, exclusions, top week/month opportunities, best future windows, score breakdowns and decision traces. Start address and exact coordinates are redacted.
 
 ## Destination Imagery
 
@@ -263,9 +458,18 @@ Coordinates are internal resolved data. They are shown for confirmation, not as 
 - Start location not found: try a nearby town, a larger city, or add the country name.
 - Wrong location found: choose a different candidate or search with more context.
 - No best destination: enable at least one destination or increase maximum route distance.
+- Destination excluded: inspect `sensor.rideradar_best_summary` attribute `excluded_destinations`.
 - No weekend opportunity: increase the forecast horizon or wait for more forecast data.
 - Distances look approximate: RideRadar currently uses a fallback route estimate with a configurable detour factor.
 - Missing destination sensor after editing destinations: reload the integration or remove stale disabled entities from Settings > Devices & services > Entities.
+
+## Known Limitations
+
+- GPX upload is architecturally prepared but not implemented yet.
+- Traffic prediction is not included in v1.0.
+- Motorcycle restriction coverage is heuristic and may be incomplete.
+- Forecast accuracy depends on Open-Meteo forecast data.
+- Distance and travel time use the current routing provider or fallback estimate.
 
 ## Development
 

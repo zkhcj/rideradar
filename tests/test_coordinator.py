@@ -154,6 +154,18 @@ async def test_coordinator_exposes_availability_windows_across_forecast_horizon(
     assert data["opportunities"][0]["days_until"] is not None
     assert data["best_weekend_opportunity"]["start_date"] in {"2026-06-05", "2026-06-06"}
     assert data["best_weekday_opportunity"]["start_date"] == "2026-06-04"
+    assert " t/m " in data["opportunities"][0]["period"]
+    assert data["opportunities"][0]["trip_efficiency_score"] is not None
+    assert data["opportunities"][0]["score_breakdown"]["ride_quality_score"] == data["opportunities"][0][
+        "ride_quality_score"
+    ]
+    trace = data["opportunities"][0]["decision_trace"]
+    assert trace["inputs"]["destination"] == "Test Destination"
+    assert trace["inputs"]["travel_strategy"] == data["travel_strategy"]
+    assert trace["window"]["period"] == data["opportunities"][0]["period"]
+    assert trace["scores"]["trip_efficiency_score"] == data["opportunities"][0]["trip_efficiency_score"]
+    assert len(data["top_week_opportunities"]) == 3
+    assert len(data["top_month_opportunities"]) == 3
 
 
 async def test_coordinator_handles_empty_destination_list(hass) -> None:
@@ -164,6 +176,105 @@ async def test_coordinator_handles_empty_destination_list(hass) -> None:
     assert data["destination_count"] == 0
     assert data["best"] is None
     assert data["summary"] == "No enabled destinations configured"
+
+
+async def test_coordinator_uses_trip_duration_number_helper(hass) -> None:
+    forecasts = [
+        _forecast_day("2026-06-04"),
+        _forecast_day("2026-06-05"),
+        _forecast_day("2026-06-06"),
+    ]
+    hass.states.async_set("input_number.rideradar_trip_duration_days", "1")
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        _entry(forecast_days=3),
+        FakeApiClient(forecasts=forecasts),
+        FakeRoutingClient(distance_km=100),
+    )
+
+    data = await coordinator._async_update_data()
+
+    assert data["trip_duration"] == 1
+    assert data["trip_duration_source"] == "input_number.rideradar_trip_duration_days"
+    assert len(data["results"][0].all_trip_windows) == 3
+
+
+async def test_coordinator_uses_flexible_trip_duration_select(hass) -> None:
+    forecasts = [
+        _forecast_day("2026-06-04"),
+        _forecast_day("2026-06-05"),
+        _forecast_day("2026-06-06"),
+    ]
+    hass.states.async_set("input_select.rideradar_trip_duration", "flexible")
+    hass.states.async_set("input_number.rideradar_trip_duration_days", "3")
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        _entry(forecast_days=3),
+        FakeApiClient(forecasts=forecasts),
+        FakeRoutingClient(distance_km=100),
+    )
+
+    data = await coordinator._async_update_data()
+
+    assert data["duration_mode"] == "flexible"
+    assert data["trip_duration_label"] == "1-3 days"
+    assert data["min_duration_days"] == 1
+    assert data["max_duration_days"] == 3
+    assert data["best_duration_days"] in {1, 2, 3}
+    assert {window.duration_days for window in data["results"][0].all_trip_windows} == {1, 2, 3}
+
+
+async def test_coordinator_filters_windows_by_preferred_start_day_and_weekend_only(hass) -> None:
+    forecasts = [
+        _forecast_day("2026-06-04"),
+        _forecast_day("2026-06-05"),
+        _forecast_day("2026-06-06"),
+        _forecast_day("2026-06-07"),
+    ]
+    hass.states.async_set("input_number.rideradar_trip_duration_days", "1")
+    hass.states.async_set("input_boolean.rideradar_weekend_only", "on")
+    hass.states.async_set("input_select.rideradar_preferred_start_day", "Saturday")
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        _entry(forecast_days=4),
+        FakeApiClient(forecasts=forecasts),
+        FakeRoutingClient(distance_km=100),
+    )
+
+    data = await coordinator._async_update_data()
+
+    assert data["weekend_only"] is True
+    assert data["preferred_start_weekday"] == 5
+    assert [opportunity["start_date"] for opportunity in data["opportunities"]] == ["2026-06-06"]
+
+
+async def test_coordinator_excludes_trailer_strategy_when_trailer_is_unavailable(hass) -> None:
+    forecasts = [
+        _forecast_day("2026-06-04"),
+        _forecast_day("2026-06-05"),
+    ]
+    hass.states.async_set("input_select.rideradar_travel_strategy", "Trailer Transport")
+    hass.states.async_set("input_boolean.rideradar_trailer_available", "off")
+    entry = _entry(forecast_days=2)
+    entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(entry, options={"trailer_support_enabled": True})
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        entry,
+        FakeApiClient(forecasts=forecasts),
+        FakeRoutingClient(distance_km=100),
+    )
+
+    data = await coordinator._async_update_data()
+
+    assert data["travel_strategy"] == "trailer"
+    assert data["trailer_available"] is False
+    assert data["best"] is None
+    assert data["opportunities"] == []
+    assert data["results"][0].ride_quality_score is None
+    assert any(
+        item["reason"] == "trailer_required_but_unavailable" for item in data["excluded_destinations"]
+    )
 
 
 async def test_coordinator_marks_unreachable_destination_without_fetching_weather(hass) -> None:
@@ -180,6 +291,7 @@ async def test_coordinator_marks_unreachable_destination_without_fetching_weathe
     assert result.reachable is False
     assert result.trip_score is None
     assert data["best"] is None
+    assert any(item["reason"] == "too_far" for item in data["excluded_destinations"])
 
 
 async def test_coordinator_does_not_rank_limited_forecast_as_complete_trip(hass) -> None:
