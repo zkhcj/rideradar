@@ -47,7 +47,9 @@ from .const import (
     MAX_FORECAST_DAYS,
     MIN_TRIP_DURATION_DAYS,
     TRAVEL_STRATEGY_MOTORCYCLE_DIRECT,
+    TRAVEL_STRATEGY_MOTORCYCLE_SCENIC,
     TRAVEL_STRATEGY_OPTIONS,
+    TRAVEL_STRATEGY_TRAILER,
     UPDATE_INTERVAL,
 )
 from .destinations import all_destinations_for_options, destinations_from_config
@@ -95,6 +97,11 @@ NATIVE_CONTROL_ENTITIES = {
     CONTROL_AVAILABLE_HOURS_PER_DAY: NATIVE_AVAILABLE_HOURS_ENTITY,
     CONTROL_MAX_APPROACH_TIME_HOURS: NATIVE_MAX_APPROACH_TIME_ENTITY,
 }
+
+ALL_OPPORTUNITIES_MIN_SCORE = 60
+ALL_OPPORTUNITIES_ATTRIBUTE_LIMIT = 100
+ALL_OPPORTUNITIES_DEFAULT_MIN_DURATION = 2
+ALL_OPPORTUNITIES_DEFAULT_MAX_DURATION = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,6 +205,10 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             "results": [],
             "best": None,
             "opportunities": [],
+            "all_opportunities": [],
+            "all_opportunities_candidate_count": 0,
+            "all_opportunities_hidden_below_threshold_count": 0,
+            "all_opportunities_attribute_limit": ALL_OPPORTUNITIES_ATTRIBUTE_LIMIT,
             "top_week_opportunities": [],
             "top_month_opportunities": [],
             "top_week_candidate_count": 0,
@@ -257,6 +268,10 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 "results": [],
                 "best": None,
                 "opportunities": [],
+                "all_opportunities": [],
+                "all_opportunities_candidate_count": 0,
+                "all_opportunities_hidden_below_threshold_count": 0,
+                "all_opportunities_attribute_limit": ALL_OPPORTUNITIES_ATTRIBUTE_LIMIT,
                 "top_week_opportunities": [],
                 "top_month_opportunities": [],
                 "top_week_candidate_count": 0,
@@ -332,6 +347,18 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 active_helpers,
             )
         )
+        all_opportunities = _ranked_opportunities(
+            _all_opportunities(
+                results,
+                planning_profile,
+                config,
+                forecast_days,
+                trip_duration,
+                window_preferences,
+                active_helpers,
+            )
+        )
+        visible_all_opportunities = _table_opportunities(all_opportunities)
         top_week = _top_opportunities(opportunities, max_days_until=7)
         top_month = _top_opportunities(opportunities)
         top_week_stats = _top_opportunity_stats(opportunities, max_days_until=7)
@@ -350,6 +377,12 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             "results": results,
             "best": best,
             "opportunities": opportunities,
+            "all_opportunities": visible_all_opportunities,
+            "all_opportunities_candidate_count": len(all_opportunities),
+            "all_opportunities_hidden_below_threshold_count": max(
+                0, len(all_opportunities) - len(visible_all_opportunities)
+            ),
+            "all_opportunities_attribute_limit": ALL_OPPORTUNITIES_ATTRIBUTE_LIMIT,
             "top_week_opportunities": top_week,
             "top_month_opportunities": top_month,
             "top_week_candidate_count": top_week_stats["candidate_count"],
@@ -606,6 +639,227 @@ def _opportunities(
             )
             opportunities.append(opportunity)
     return opportunities
+
+
+def _all_opportunities(
+    results: list[DestinationResult],
+    planning_profile: TripPlanningProfile,
+    config: dict[str, Any],
+    forecast_days: int,
+    trip_duration: TripDurationSelection,
+    window_preferences: WindowPreferences,
+    active_helpers: dict[str, str | None],
+) -> list[dict[str, Any]]:
+    opportunities: list[dict[str, Any]] = []
+    table_duration = _all_opportunities_duration_selection(trip_duration, forecast_days)
+    activity_profile = str(config.get(CONF_ACTIVITY_PROFILE, DEFAULT_ACTIVITY_PROFILE))
+    for result in results:
+        if not result.reachable or result.route is None or not result.forecasts:
+            continue
+        windows = calculate_variable_trip_windows(
+            result.forecasts,
+            table_duration.min_days,
+            table_duration.max_days,
+            activity_profile,
+        )
+        windows = [window for window in windows if _matches_window_preferences(window, window_preferences)]
+        for strategy_profile in _all_opportunity_strategy_profiles(planning_profile):
+            for window in windows:
+                experience = calculate_ride_experience(
+                    result.destination,
+                    result.route,
+                    window,
+                    result.forecasts,
+                    strategy_profile,
+                )
+                if experience.exclusion_reasons:
+                    continue
+                opportunity = _opportunity_payload(
+                    result,
+                    window,
+                    experience,
+                    config,
+                    forecast_days,
+                    table_duration,
+                    strategy_profile,
+                    window_preferences,
+                    active_helpers,
+                )
+                opportunities.append(opportunity)
+    return opportunities
+
+
+def _opportunity_payload(
+    result: DestinationResult,
+    window: Any,
+    experience: Any,
+    config: dict[str, Any],
+    forecast_days: int,
+    trip_duration: TripDurationSelection,
+    planning_profile: TripPlanningProfile,
+    window_preferences: WindowPreferences,
+    active_helpers: dict[str, str | None],
+) -> dict[str, Any]:
+    opportunity = {
+        "destination": result.destination.name,
+        "start_date": window.start_day,
+        "end_date": window.end_day,
+        "start_date_display": _format_date(window.start_day),
+        "end_date_display": _format_date(window.end_day),
+        "period": _format_period(window.start_day, window.end_day),
+        "duration_days": window.duration_days,
+        "trip_score": window.trip_score,
+        "score": experience.ride_quality_score,
+        "ride_quality_score": experience.ride_quality_score,
+        "weather_score": experience.weather_score,
+        "stability_score": window.weather_stability_score,
+        "traffic_score": experience.traffic_score,
+        "traffic_level": _pressure_level(experience.traffic_score),
+        "tourism_pressure_score": experience.tourism_pressure_score,
+        "tourism_level": _pressure_level(experience.tourism_pressure_score),
+        "holiday_pressure_score": experience.holiday_pressure_score,
+        "holiday_score": experience.holiday_score,
+        "access_score": experience.access_score,
+        "motorcycle_access_score": experience.motorcycle_access_score,
+        "access_status": _access_status(experience.motorcycle_access_score),
+        "distance_score": experience.distance_score,
+        "temperature_score": experience.temperature_score,
+        "trip_efficiency_score": experience.trip_efficiency_score,
+        "score_weights": experience.score_weights,
+        "score_caps": experience.score_caps,
+        "recommendation_type": experience.recommendation_type,
+        "strategy": experience.travel_strategy,
+        "strategy_label": _strategy_label(experience.travel_strategy),
+        "travel_strategy": experience.travel_strategy,
+        "approach_time_hours": experience.approach_time_hours,
+        "return_time_hours": experience.return_time_hours,
+        "total_available_time_hours": experience.total_available_time_hours,
+        "estimated_destination_ride_time_hours": experience.estimated_destination_ride_time_hours,
+        "approach_enjoyment_factor": experience.approach_enjoyment_factor,
+        "destination_ride_time_ratio": experience.destination_ride_time_ratio,
+        "score_breakdown": _score_breakdown(experience, window),
+        "recommendation_reason": _recommendation_reason(result.destination.name, experience, window),
+        "main_reason": _main_reason(result.destination.name, experience, window),
+        "tradeoffs": _tradeoffs(experience, window),
+        "main_tradeoff": _main_tradeoff(experience, window),
+        "road_fun_score": experience.road_fun_score,
+        "holiday_names": experience.holiday_names,
+        "access_notes": experience.access_notes,
+        "access_warnings": experience.access_warnings,
+        "known_restrictions": experience.known_restrictions,
+        "exclusion_reasons": experience.exclusion_reasons,
+        "route_distance_km": result.route.distance_km,
+        "distance_km": result.route.distance_km,
+        "estimated_travel_time": _format_minutes(result.route.travel_time_minutes),
+        "daily_scores": window.daily_scores,
+        "verdict": _window_verdict(experience.ride_quality_score, _is_weekend_window(window)),
+        "explanation": f"{window.trip_explanation} {experience.explanation}",
+        "window_type": "weekend" if _is_weekend_window(window) else "weekday",
+        "days_until": _days_until(window.start_day),
+    }
+    opportunity["decision_trace"] = _decision_trace(
+        opportunity,
+        result,
+        config,
+        forecast_days,
+        trip_duration,
+        planning_profile,
+        window_preferences,
+        active_helpers,
+    )
+    return opportunity
+
+
+def _all_opportunities_duration_selection(
+    trip_duration: TripDurationSelection,
+    forecast_days: int,
+) -> TripDurationSelection:
+    if forecast_days <= 1:
+        min_days = 1
+    else:
+        configured_min = (
+            trip_duration.min_days
+            if trip_duration.mode == "flexible"
+            else ALL_OPPORTUNITIES_DEFAULT_MIN_DURATION
+        )
+        min_days = min(forecast_days, max(ALL_OPPORTUNITIES_DEFAULT_MIN_DURATION, configured_min))
+    max_days = min(forecast_days, max(ALL_OPPORTUNITIES_DEFAULT_MAX_DURATION, trip_duration.max_days))
+    if max_days < min_days:
+        max_days = min_days
+    return TripDurationSelection("flexible", min_days, max_days, "all_opportunities_table")
+
+
+def _all_opportunity_strategy_profiles(planning_profile: TripPlanningProfile) -> list[TripPlanningProfile]:
+    strategies = [TRAVEL_STRATEGY_MOTORCYCLE_DIRECT, TRAVEL_STRATEGY_MOTORCYCLE_SCENIC]
+    if planning_profile.trailer_support_enabled and planning_profile.trailer_available:
+        strategies.append(TRAVEL_STRATEGY_TRAILER)
+    return [
+        TripPlanningProfile(
+            travel_strategy=strategy,
+            available_hours_per_day=planning_profile.available_hours_per_day,
+            max_approach_time_hours=planning_profile.max_approach_time_hours,
+            trailer_support_enabled=planning_profile.trailer_support_enabled,
+            trailer_available=planning_profile.trailer_available,
+        )
+        for strategy in strategies
+    ]
+
+
+def _table_opportunities(opportunities: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    visible = [
+        _compact_table_opportunity(opportunity)
+        for opportunity in opportunities
+        if int(opportunity["ride_quality_score"]) >= ALL_OPPORTUNITIES_MIN_SCORE
+    ]
+    return visible[:ALL_OPPORTUNITIES_ATTRIBUTE_LIMIT]
+
+
+def _compact_table_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "destination": opportunity["destination"],
+        "strategy": opportunity["strategy"],
+        "strategy_label": opportunity["strategy_label"],
+        "duration_days": opportunity["duration_days"],
+        "period": opportunity["period"],
+        "start_date": opportunity["start_date"],
+        "end_date": opportunity["end_date"],
+        "days_until": opportunity["days_until"],
+        "score": opportunity["ride_quality_score"],
+        "ride_quality_score": opportunity["ride_quality_score"],
+        "weather_score": opportunity["weather_score"],
+        "stability_score": opportunity["stability_score"],
+        "trip_efficiency_score": opportunity["trip_efficiency_score"],
+        "distance_km": opportunity["distance_km"],
+        "route_distance_km": opportunity["route_distance_km"],
+        "approach_time_hours": opportunity["approach_time_hours"],
+        "verdict": opportunity["verdict"],
+        "main_reason": opportunity["main_reason"],
+        "main_tradeoff": opportunity["main_tradeoff"],
+    }
+
+
+def _strategy_label(strategy: str) -> str:
+    return {
+        TRAVEL_STRATEGY_MOTORCYCLE_DIRECT: "Direct / snelweg",
+        TRAVEL_STRATEGY_MOTORCYCLE_SCENIC: "Binnendoor / scenic",
+        TRAVEL_STRATEGY_TRAILER: "Aanhangertransport",
+    }.get(strategy, strategy)
+
+
+def _main_reason(destination: str, experience: Any, window: Any) -> str:
+    if experience.ride_quality_score >= 70:
+        return (
+            f"{destination} heeft de beste balans tussen weer, stabiliteit en bruikbare rijtijd "
+            f"voor {window.duration_days} dagen."
+        )
+    return (
+        f"{destination} is alleen het overwegen waard als compromis; de score blijft onder een sterk adviesniveau."
+    )
+
+
+def _main_tradeoff(experience: Any, window: Any) -> str:
+    tradeoffs = _tradeoffs(experience, window)
+    return tradeoffs[0] if tradeoffs else "Geen grote trade-off gedetecteerd."
 
 
 def _ranked_opportunities(opportunities: list[dict[str, Any]]) -> list[dict[str, Any]]:

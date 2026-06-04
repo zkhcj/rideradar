@@ -37,9 +37,13 @@ def test_default_dashboard_uses_native_entities_and_literal_markdown_tables() ->
         "switch.rideradar_trailer_available",
         "number.rideradar_available_hours_per_day",
         "number.rideradar_max_approach_time_hours",
+        "sensor.rideradar_all_opportunities",
     ):
         assert entity_id in readme
 
     assert "content: |\n          {% set windows = state_attr('sensor.rideradar_best_opportunities'" in readme
     assert "| # | Bestemming | Score | Weer | Efficiëntie | Periode |" in readme
     assert "Aanhanger vandaag beschikbaar" in readme
+    assert "type: custom:flex-table-card" in readme
+    assert "opportunities.score" in readme
+    assert "opportunities.strategy_label" in readme

@@ -146,6 +146,24 @@ async def async_setup_entry(
             entry,
             coordinator,
             SensorEntityDescription(
+                key="all_opportunities",
+                name="All Opportunities",
+                icon="mdi:table-search",
+                state_class=SensorStateClass.MEASUREMENT,
+            ),
+            lambda data: len(data.get("all_opportunities") or []),
+            lambda data: {
+                "opportunities": data.get("all_opportunities", []),
+                "candidate_count": data.get("all_opportunities_candidate_count", 0),
+                "hidden_below_threshold_count": data.get("all_opportunities_hidden_below_threshold_count", 0),
+                "minimum_visible_score": 60,
+                "attribute_limit": data.get("all_opportunities_attribute_limit", 100),
+            },
+        ),
+        RideRadarSensor(
+            entry,
+            coordinator,
+            SensorEntityDescription(
                 key="top_week_opportunities",
                 name="Top Week Opportunities",
                 icon="mdi:calendar-week",

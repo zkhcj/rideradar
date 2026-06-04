@@ -398,6 +398,93 @@ Trailer recommendations only appear when trailer transport mode is enabled in co
 
 Legacy `input_*` helpers are still read as fallback for older dashboards, but new dashboards should use the native RideRadar entities above.
 
+## All Options Dashboard
+
+The default dashboard stays rider-first. For power users, RideRadar also exposes `sensor.rideradar_all_opportunities`.
+
+This sensor compares realistic opportunities side by side across multiple durations and strategies. By default the public table attribute contains candidates scoring 60+ and is capped to a reasonable size. It evaluates 2-day through 4-day windows when the forecast horizon allows it, and extends higher when the configured/custom maximum trip duration is higher. Direct and scenic strategies are shown side by side. Trailer opportunities are hidden unless trailer transport support is enabled and `switch.rideradar_trailer_available` is on; if trailer is unavailable, exclusion/debug data still explains why trailer options are absent.
+
+For sorting/filtering, install `custom:flex-table-card` through HACS. Its documentation describes selecting entity attributes as columns and expanding list attributes into rows, which is how the `opportunities` attribute is used here: https://github.com/custom-cards/flex-table-card
+
+```yaml
+title: RideRadar All Options
+path: rideradar-all-options
+icon: mdi:table-search
+type: sections
+max_columns: 1
+sections:
+  - type: grid
+    cards:
+      - type: entities
+        title: Planning filters
+        entities:
+          - entity: number.rideradar_trip_duration_days
+            name: Max dagen voor tabel
+          - entity: number.rideradar_forecast_horizon_days
+            name: Forecast horizon
+          - entity: switch.rideradar_weekend_only
+            name: Alleen weekend
+          - entity: select.rideradar_preferred_start_day
+            name: Gewenste startdag
+          - entity: switch.rideradar_trailer_available
+            name: Aanhanger vandaag beschikbaar
+      - type: custom:flex-table-card
+        title: Alle RideRadar opties
+        entities:
+          include:
+            - sensor.rideradar_all_opportunities
+        sort_by:
+          - score-
+        columns:
+          - name: Score
+            data: opportunities.score
+          - name: Bestemming
+            data: opportunities.destination
+          - name: Strategie
+            data: opportunities.strategy_label
+          - name: Dagen
+            data: opportunities.duration_days
+          - name: Periode
+            data: opportunities.period
+          - name: Weer
+            data: opportunities.weather_score
+          - name: Stabiliteit
+            data: opportunities.stability_score
+          - name: Efficiëntie
+            data: opportunities.trip_efficiency_score
+          - name: Afstand
+            data: opportunities.distance_km
+          - name: Aanrijtijd
+            data: opportunities.approach_time_hours
+          - name: Reden
+            data: opportunities.main_reason
+      - type: markdown
+        title: Tabelstatus
+        content: |
+          Zichtbare opties: **{{ states('sensor.rideradar_all_opportunities') }}**
+
+          Alle kandidaten: **{{ state_attr('sensor.rideradar_all_opportunities', 'candidate_count') | default(0) }}**
+
+          Verborgen onder score 60 of boven attribute-limit: **{{ state_attr('sensor.rideradar_all_opportunities', 'hidden_below_threshold_count') | default(0) }}**
+```
+
+If `custom:flex-table-card` is not installed, use this fallback markdown table. It is readable and copy-paste safe, but Home Assistant markdown tables are not truly sortable or filterable.
+
+```yaml
+type: markdown
+title: Alle RideRadar opties
+content: |
+  {% set rows = state_attr('sensor.rideradar_all_opportunities', 'opportunities') or [] %}
+  | Score | Bestemming | Strategie | Dagen | Periode | Weer | Stabiliteit | Efficiëntie | Afstand | Aanrijtijd |
+  |---:|---|---|---:|---|---:|---:|---:|---:|---:|
+  {% for item in rows %}
+  {% set item = item if item is mapping else {} %}
+  | {{ item.get('score', 'n.b.') }} | {{ item.get('destination', 'n.b.') }} | {{ item.get('strategy_label', 'n.b.') }} | {{ item.get('duration_days', 'n.b.') }} | {{ item.get('period', 'n.b.') }} | {{ item.get('weather_score', 'n.b.') }} | {{ item.get('stability_score', 'n.b.') }} | {{ item.get('trip_efficiency_score', 'n.b.') }} | {{ item.get('distance_km', 0) | round(0) }} km | {{ item.get('approach_time_hours', 0) | round(1) }} u |
+  {% else %}
+  | - | Nog geen opties beschikbaar | - | - | RideRadar wacht op forecast-data of alle kandidaten zijn onder de zichtbare drempel. | - | - | - | - | - |
+  {% endfor %}
+```
+
 ## Optional Debug Dashboard
 
 Use this while testing RideRadar decisions. It shows the selected scenario, the best score, the top exclusion reason, and the score breakdown.
