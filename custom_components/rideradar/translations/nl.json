@@ -17,26 +17,25 @@
       },
       "confirm_location": {
         "title": "Bevestig startlocatie",
-        "description": "RideRadar heeft **{address}** gevonden. Coordinaten: **{latitude}**, **{longitude}**. Ga alleen door als dit het juiste startpunt is.",
-        "data": {}
+        "description": "RideRadar heeft **{address}** gevonden. Coordinaten: **{latitude}**, **{longitude}**. Ga alleen door als dit het juiste startpunt is. Zet het vinkje uit om opnieuw te zoeken.",
+        "data": {
+          "confirm_location": "Dit is de juiste startlocatie"
+        }
       },
       "settings": {
         "title": "RideRadar ritinstellingen",
-        "description": "Kies bereik, voorspelling, activiteitsprofiel en standaard bestemmingsgebieden.",
+        "description": "Kies verstandige standaardwaarden voor bereik, voorspelling, aanhangerondersteuning en bestemmingsgebieden. Dynamische planning pas je later direct aan op het dashboard.",
         "data": {
           "max_route_distance_km": "Maximale routeafstand",
           "forecast_days": "Voorspellingshorizon in dagen",
-          "preferred_trip_duration": "Gewenste reisduur",
-          "custom_trip_duration_days": "Aangepaste reisduur",
-          "activity_profile": "Activiteitsprofiel",
-          "detour_factor": "Omwegfactor voor fallback-route",
-          "trailer_support_enabled": "Trailertransportstrategie inschakelen",
+          "preferred_trip_duration": "Standaard ritduur",
+          "trailer_support_enabled": "Aanhangertransport inschakelen",
           "enabled_default_destinations": "Ingeschakelde standaardbestemmingen"
         }
       }
     },
     "error": {
-      "address_not_found": "Er is geen passende locatie gevonden. Probeer een nabijgelegen plaats, grotere stad of voeg het land toe.",
+      "address_not_found": "Geen locatie gevonden. Probeer een grotere plaats in de buurt, voeg het land toe, of gebruik een specifieker adres.",
       "geocoding_failed": "Locatie opzoeken is mislukt. Probeer later opnieuw of zoek naar een nabijgelegen plaats.",
       "invalid_location_choice": "Kies een van de gevonden locaties.",
       "invalid_activity_profile": "Selecteer een ondersteund activiteitsprofiel.",
@@ -84,8 +83,10 @@
       },
       "confirm_location": {
         "title": "Bevestig startlocatie",
-        "description": "RideRadar heeft **{address}** gevonden. Coordinaten: **{latitude}**, **{longitude}**. Ga alleen door als dit het juiste startpunt is.",
-        "data": {}
+        "description": "RideRadar heeft **{address}** gevonden. Coordinaten: **{latitude}**, **{longitude}**. Ga alleen door als dit het juiste startpunt is. Zet het vinkje uit om opnieuw te zoeken.",
+        "data": {
+          "confirm_location": "Dit is de juiste startlocatie"
+        }
       },
       "manual_start_location": {
         "title": "Handmatige startcoordinaten",
@@ -98,15 +99,12 @@
       },
       "settings": {
         "title": "Ritinstellingen",
-        "description": "Wijzig bereik, voorspelling, reisduur, activiteitsprofiel en routefallback.",
+        "description": "Wijzig standaard bereik, voorspelling, ritduur en aanhangerondersteuning. Scenario-instellingen zoals alleen weekend, reisstrategie, custom dagen, beschikbare tijd en maximale aanrijtijd zijn native dashboardcontrols.",
         "data": {
           "max_route_distance_km": "Maximale routeafstand",
           "forecast_days": "Voorspellingshorizon in dagen",
-          "preferred_trip_duration": "Gewenste reisduur",
-          "custom_trip_duration_days": "Aangepaste reisduur",
-          "activity_profile": "Activiteitsprofiel",
-          "detour_factor": "Omwegfactor voor fallback-route",
-          "trailer_support_enabled": "Trailertransportstrategie inschakelen"
+          "preferred_trip_duration": "Standaard ritduur",
+          "trailer_support_enabled": "Aanhangertransport inschakelen"
         }
       },
       "destinations": {
@@ -155,7 +153,7 @@
       }
     },
     "error": {
-      "address_not_found": "Er is geen passende locatie gevonden. Probeer een nabijgelegen plaats, grotere stad of voeg het land toe.",
+      "address_not_found": "Geen locatie gevonden. Probeer een grotere plaats in de buurt, voeg het land toe, of gebruik een specifieker adres.",
       "geocoding_failed": "Locatie opzoeken is mislukt. Probeer later opnieuw of zoek naar een nabijgelegen plaats.",
       "invalid_activity_profile": "Selecteer een ondersteund activiteitsprofiel.",
       "invalid_coordinates": "Coordinaten zijn ongeldig of buiten het ondersteunde bereik.",

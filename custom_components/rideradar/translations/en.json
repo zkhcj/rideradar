@@ -17,26 +17,25 @@
       },
       "confirm_location": {
         "title": "Confirm start location",
-        "description": "RideRadar found **{address}**. Coordinates: **{latitude}**, **{longitude}**. Continue only if this is the right start point.",
-        "data": {}
+        "description": "RideRadar found **{address}**. Coordinates: **{latitude}**, **{longitude}**. Continue only if this is the right start point. Clear the checkbox to search again.",
+        "data": {
+          "confirm_location": "This is the correct start location"
+        }
       },
       "settings": {
         "title": "RideRadar trip settings",
-        "description": "Choose your ride range, forecast window, activity profile, and default destination areas.",
+        "description": "Choose sensible defaults for ride range, forecast window, trailer support, and destination areas. You can adjust dynamic planning controls from the dashboard later.",
         "data": {
           "max_route_distance_km": "Maximum route distance",
           "forecast_days": "Forecast horizon days",
-          "preferred_trip_duration": "Preferred trip duration",
-          "custom_trip_duration_days": "Custom trip duration",
-          "activity_profile": "Activity profile",
-          "detour_factor": "Fallback route detour factor",
-          "trailer_support_enabled": "Enable trailer transport strategy",
+          "preferred_trip_duration": "Default trip duration",
+          "trailer_support_enabled": "Enable trailer transport mode",
           "enabled_default_destinations": "Enabled default destinations"
         }
       }
     },
     "error": {
-      "address_not_found": "No matching location was found. Try a nearby town, a larger city, or add the country name.",
+      "address_not_found": "No location found. Try a larger nearby town, add the country name, or use a more specific address.",
       "geocoding_failed": "Location lookup failed. Try again later or search for a nearby town.",
       "invalid_location_choice": "Choose one of the resolved locations.",
       "invalid_activity_profile": "Select a supported activity profile.",
@@ -84,8 +83,10 @@
       },
       "confirm_location": {
         "title": "Confirm start location",
-        "description": "RideRadar found **{address}**. Coordinates: **{latitude}**, **{longitude}**. Continue only if this is the right start point.",
-        "data": {}
+        "description": "RideRadar found **{address}**. Coordinates: **{latitude}**, **{longitude}**. Continue only if this is the right start point. Clear the checkbox to search again.",
+        "data": {
+          "confirm_location": "This is the correct start location"
+        }
       },
       "manual_start_location": {
         "title": "Manual start coordinates",
@@ -98,15 +99,12 @@
       },
       "settings": {
         "title": "Trip settings",
-        "description": "Change range, forecast days, trip duration, activity profile, and route-distance fallback.",
+        "description": "Change default range, forecast days, trip duration, and trailer support. Scenario controls such as weekend-only, travel strategy, custom days, available time, and max approach time are native dashboard entities.",
         "data": {
           "max_route_distance_km": "Maximum route distance",
           "forecast_days": "Forecast horizon days",
-          "preferred_trip_duration": "Preferred trip duration",
-          "custom_trip_duration_days": "Custom trip duration",
-          "activity_profile": "Activity profile",
-          "detour_factor": "Fallback route detour factor",
-          "trailer_support_enabled": "Enable trailer transport strategy"
+          "preferred_trip_duration": "Default trip duration",
+          "trailer_support_enabled": "Enable trailer transport mode"
         }
       },
       "destinations": {
@@ -155,7 +153,7 @@
       }
     },
     "error": {
-      "address_not_found": "No matching location was found. Try a nearby town, a larger city, or add the country name.",
+      "address_not_found": "No location found. Try a larger nearby town, add the country name, or use a more specific address.",
       "geocoding_failed": "Location lookup failed. Try again later or search for a nearby town.",
       "invalid_activity_profile": "Select a supported activity profile.",
       "invalid_coordinates": "Coordinates are invalid or outside the supported range.",

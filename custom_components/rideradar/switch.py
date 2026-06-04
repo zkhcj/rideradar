@@ -33,7 +33,7 @@ SWITCHES = (
     ),
     RideRadarSwitchDescription(
         key=CONTROL_TRAILER_AVAILABLE,
-        name="Trailer Available",
+        name="Trailer Available Today",
         icon="mdi:trailer",
     ),
 )

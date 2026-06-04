@@ -73,6 +73,7 @@ from .models import DestinationArea, RideRadarConfigError
 FIELD_ACTION = "action"
 FIELD_ADDRESS = "address"
 FIELD_LOCATION = "location"
+FIELD_CONFIRM_LOCATION = "confirm_location"
 FIELD_ENABLED_DESTINATIONS = "enabled_destinations"
 FIELD_DESTINATION_NAME = "destination_name"
 FIELD_COUNTRY_REGION = "country_region"
@@ -162,6 +163,8 @@ class RideRadarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> config_entries.ConfigFlowResult:
         """Confirm resolved start coordinates."""
         if user_input is not None:
+            if not bool(user_input.get(FIELD_CONFIRM_LOCATION, True)):
+                return await self.async_step_user()
             return await self.async_step_settings()
         return self.async_show_form(
             step_id="confirm_location",
@@ -170,7 +173,7 @@ class RideRadarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "latitude": f"{float(self._data[CONF_START_LATITUDE]):.5f}",
                 "longitude": f"{float(self._data[CONF_START_LONGITUDE]):.5f}",
             },
-            data_schema=vol.Schema({}),
+            data_schema=vol.Schema({vol.Required(FIELD_CONFIRM_LOCATION, default=True): BooleanSelector()}),
         )
 
     async def async_step_settings(
@@ -323,6 +326,8 @@ class RideRadarOptionsFlow(config_entries.OptionsFlow):
     ) -> config_entries.ConfigFlowResult:
         """Confirm the resolved options start location."""
         if user_input is not None:
+            if not bool(user_input.get(FIELD_CONFIRM_LOCATION, True)):
+                return await self.async_step_start_location()
             return self._save_options({**self._pending_options, **self._pending_destination})
         return self.async_show_form(
             step_id="confirm_location",
@@ -331,7 +336,7 @@ class RideRadarOptionsFlow(config_entries.OptionsFlow):
                 "latitude": f"{float(self._pending_destination[CONF_START_LATITUDE]):.5f}",
                 "longitude": f"{float(self._pending_destination[CONF_START_LONGITUDE]):.5f}",
             },
-            data_schema=vol.Schema({}),
+            data_schema=vol.Schema({vol.Required(FIELD_CONFIRM_LOCATION, default=True): BooleanSelector()}),
         )
 
     async def async_step_manual_start_location(
@@ -620,33 +625,9 @@ def _settings_schema(defaults: dict[str, Any], include_destinations: bool = True
                     {"value": "2", "label": "2 days"},
                     {"value": "3", "label": "3 days"},
                     {"value": "flexible", "label": "Flexible"},
-                    {"value": "custom", "label": "Custom"},
                 ],
                 mode=SelectSelectorMode.DROPDOWN,
             )
-        ),
-        vol.Required(
-            CONF_CUSTOM_TRIP_DURATION_DAYS,
-            default=defaults.get(CONF_CUSTOM_TRIP_DURATION_DAYS, DEFAULT_CUSTOM_TRIP_DURATION_DAYS),
-        ): NumberSelector(
-            NumberSelectorConfig(
-                mode=NumberSelectorMode.BOX,
-                min=MIN_TRIP_DURATION_DAYS,
-                max=MAX_FORECAST_DAYS,
-                step=1,
-                unit_of_measurement="days",
-            )
-        ),
-        vol.Required(
-            CONF_ACTIVITY_PROFILE,
-            default=defaults.get(CONF_ACTIVITY_PROFILE, DEFAULT_ACTIVITY_PROFILE),
-        ): SelectSelector(
-            SelectSelectorConfig(options=list(SUPPORTED_ACTIVITY_PROFILES), mode=SelectSelectorMode.DROPDOWN)
-        ),
-        vol.Required(
-            CONF_DETOUR_FACTOR, default=defaults.get(CONF_DETOUR_FACTOR, DEFAULT_DETOUR_FACTOR)
-        ): NumberSelector(
-            NumberSelectorConfig(mode=NumberSelectorMode.BOX, min=MIN_DETOUR_FACTOR, max=MAX_DETOUR_FACTOR, step=0.05)
         ),
         vol.Required(
             CONF_TRAILER_SUPPORT_ENABLED,
@@ -729,7 +710,7 @@ def _settings_errors(data: dict[str, Any]) -> dict[str, str]:
     preferred_duration = str(data.get(CONF_PREFERRED_TRIP_DURATION, ""))
     if preferred_duration not in PREFERRED_TRIP_DURATION_OPTIONS:
         errors[CONF_PREFERRED_TRIP_DURATION] = "invalid_trip_duration"
-    custom_duration = _as_int(data.get(CONF_CUSTOM_TRIP_DURATION_DAYS))
+    custom_duration = _as_int(data.get(CONF_CUSTOM_TRIP_DURATION_DAYS, DEFAULT_CUSTOM_TRIP_DURATION_DAYS))
     if custom_duration is None or custom_duration < MIN_TRIP_DURATION_DAYS:
         errors[CONF_CUSTOM_TRIP_DURATION_DAYS] = "invalid_trip_duration"
     elif preferred_duration in {"custom", "flexible"} and forecast_days is not None and custom_duration > forecast_days:
@@ -742,10 +723,10 @@ def _settings_errors(data: dict[str, Any]) -> dict[str, str]:
         and int(preferred_duration) > forecast_days
     ):
         errors[CONF_PREFERRED_TRIP_DURATION] = "invalid_trip_duration"
-    detour_factor = _as_float(data.get(CONF_DETOUR_FACTOR))
+    detour_factor = _as_float(data.get(CONF_DETOUR_FACTOR, DEFAULT_DETOUR_FACTOR))
     if detour_factor is None or not MIN_DETOUR_FACTOR <= detour_factor <= MAX_DETOUR_FACTOR:
         errors[CONF_DETOUR_FACTOR] = "invalid_detour_factor"
-    if data.get(CONF_ACTIVITY_PROFILE) not in SUPPORTED_ACTIVITY_PROFILES:
+    if data.get(CONF_ACTIVITY_PROFILE, DEFAULT_ACTIVITY_PROFILE) not in SUPPORTED_ACTIVITY_PROFILES:
         errors[CONF_ACTIVITY_PROFILE] = "invalid_activity_profile"
     return errors
 
@@ -755,9 +736,11 @@ def _normalized_settings(data: dict[str, Any]) -> dict[str, Any]:
         CONF_MAX_ROUTE_DISTANCE_KM: float(data[CONF_MAX_ROUTE_DISTANCE_KM]),
         CONF_FORECAST_DAYS: int(data[CONF_FORECAST_DAYS]),
         CONF_PREFERRED_TRIP_DURATION: str(data[CONF_PREFERRED_TRIP_DURATION]),
-        CONF_CUSTOM_TRIP_DURATION_DAYS: int(data[CONF_CUSTOM_TRIP_DURATION_DAYS]),
-        CONF_ACTIVITY_PROFILE: str(data[CONF_ACTIVITY_PROFILE]),
-        CONF_DETOUR_FACTOR: float(data[CONF_DETOUR_FACTOR]),
+        CONF_CUSTOM_TRIP_DURATION_DAYS: int(
+            data.get(CONF_CUSTOM_TRIP_DURATION_DAYS, DEFAULT_CUSTOM_TRIP_DURATION_DAYS)
+        ),
+        CONF_ACTIVITY_PROFILE: str(data.get(CONF_ACTIVITY_PROFILE, DEFAULT_ACTIVITY_PROFILE)),
+        CONF_DETOUR_FACTOR: float(data.get(CONF_DETOUR_FACTOR, DEFAULT_DETOUR_FACTOR)),
         CONF_TRAILER_SUPPORT_ENABLED: bool(data[CONF_TRAILER_SUPPORT_ENABLED]),
     }
 
@@ -782,7 +765,7 @@ def _location_options(results: list[LocationResult]) -> list[dict[str, str]]:
     return [
         {
             "value": str(index),
-            "label": f"{result.label} ({result.latitude:.5f}, {result.longitude:.5f})",
+            "label": f"{result.label} ({result.latitude:.2f}, {result.longitude:.2f})",
         }
         for index, result in enumerate(results)
     ]

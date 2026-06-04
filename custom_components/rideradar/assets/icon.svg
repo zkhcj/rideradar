@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="RideRadar icon">
+  <title>RideRadar</title>
+  <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M58 168h36l32-46h38l28 46h16" stroke-width="14"/>
+    <path d="M102 168h54" stroke-width="14"/>
+    <circle cx="62" cy="178" r="24" stroke-width="14"/>
+    <circle cx="194" cy="178" r="24" stroke-width="14"/>
+    <path d="M126 122l-24-34h-24" stroke-width="14"/>
+    <path d="M160 122l22-30h24" stroke-width="14"/>
+    <path d="M136 70c28 0 54 12 72 32" stroke-width="12"/>
+    <path d="M136 42c42 0 80 18 106 47" stroke-width="10"/>
+    <path d="M136 98c15 0 28 6 38 17" stroke-width="10"/>
+  </g>
+</svg>

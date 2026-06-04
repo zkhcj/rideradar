@@ -63,7 +63,15 @@ class OpenMeteoGeocodingClient(GeocodingClient):
         results = payload.get("results") or []
         if not isinstance(results, list):
             raise GeocodingError("Geocoding results were invalid")
-        return [_location_from_open_meteo(item) for item in results if isinstance(item, dict)]
+        locations: list[LocationResult] = []
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            try:
+                locations.append(_location_from_open_meteo(item))
+            except GeocodingError:
+                continue
+        return locations
 
 
 def _location_from_open_meteo(value: dict[str, Any]) -> LocationResult:

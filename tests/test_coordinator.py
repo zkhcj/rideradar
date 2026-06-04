@@ -318,3 +318,71 @@ async def test_coordinator_raises_update_failed_when_api_unavailable(hass) -> No
 
     with pytest.raises(UpdateFailed):
         await coordinator._async_update_data()
+
+
+async def test_coordinator_update_failed_message_is_provider_friendly(hass) -> None:
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        _entry(),
+        FakeApiClient(error=RideRadarApiError("Open-Meteo returned HTTP 502")),
+        FakeRoutingClient(),
+    )
+
+    with pytest.raises(UpdateFailed, match="Forecast provider is temporarily unavailable"):
+        await coordinator._async_update_data()
+
+
+async def test_coordinator_retains_previous_data_after_provider_failure(hass) -> None:
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        _entry(),
+        FakeApiClient(error=RideRadarApiError("Open-Meteo returned HTTP 502")),
+        FakeRoutingClient(),
+    )
+    coordinator.data = {"summary": "previous valid data", "results": ["previous"]}
+
+    await coordinator.async_refresh()
+
+    assert coordinator.data == {"summary": "previous valid data", "results": ["previous"]}
+    assert coordinator.last_update_success is False
+
+
+async def test_coordinator_unavailable_data_is_dashboard_safe(hass) -> None:
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        _entry(),
+        FakeApiClient(error=RideRadarApiError("Open-Meteo returned HTTP 502")),
+        FakeRoutingClient(),
+    )
+
+    data = coordinator.unavailable_data()
+
+    assert data["forecast_status"] == "temporarily_unavailable"
+    assert data["best_next_available_opportunity"] is None
+    assert data["top_week_opportunities"] == []
+    assert data["top_month_best_below_threshold"] is None
+    assert "weerservice is tijdelijk niet beschikbaar" in data["summary"]
+
+
+async def test_coordinator_handles_timeout_as_update_failure(hass) -> None:
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        _entry(),
+        FakeApiClient(error=TimeoutError("timeout")),
+        FakeRoutingClient(),
+    )
+
+    with pytest.raises(UpdateFailed, match="Could not update RideRadar data"):
+        await coordinator._async_update_data()
+
+
+async def test_coordinator_handles_malformed_provider_data_as_update_failure(hass) -> None:
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        _entry(),
+        FakeApiClient(error=ValueError("malformed response")),
+        FakeRoutingClient(),
+    )
+
+    with pytest.raises(UpdateFailed, match="Could not update RideRadar data"):
+        await coordinator._async_update_data()

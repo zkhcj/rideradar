@@ -169,6 +169,70 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
     def _active_helper_states(self) -> dict[str, str | None]:
         return _active_helper_states(self.hass, self.runtime_controls)
 
+    def unavailable_data(
+        self,
+        message: str = "De weerservice is tijdelijk niet beschikbaar. RideRadar probeert het automatisch opnieuw.",
+    ) -> CoordinatorData:
+        """Return safe coordinator data for startup or temporary provider failures."""
+        config = self.config
+        try:
+            forecast_days = self._forecast_days_selection(config)
+            trip_duration = self._trip_duration_selection(config, forecast_days)
+            planning_profile = self._trip_planning_profile(config)
+            window_preferences = self._window_preferences()
+            active_helpers = self._active_helper_states()
+            disabled_destinations = _disabled_destinations(config)
+        except (KeyError, TypeError, ValueError, RideRadarConfigError):
+            forecast_days = DEFAULT_FORECAST_DAYS
+            trip_duration = TripDurationSelection(
+                mode=DEFAULT_DURATION_MODE,
+                min_days=MIN_TRIP_DURATION_DAYS,
+                max_days=DEFAULT_CUSTOM_TRIP_DURATION_DAYS,
+                source="safe_default",
+            )
+            planning_profile = TripPlanningProfile()
+            window_preferences = WindowPreferences()
+            active_helpers = {}
+            disabled_destinations = []
+        return {
+            "results": [],
+            "best": None,
+            "opportunities": [],
+            "top_week_opportunities": [],
+            "top_month_opportunities": [],
+            "top_week_candidate_count": 0,
+            "top_week_rejected_count": 0,
+            "top_week_best_below_threshold": None,
+            "top_month_candidate_count": 0,
+            "top_month_rejected_count": 0,
+            "top_month_best_below_threshold": None,
+            "best_weekend_opportunity": None,
+            "best_weekday_opportunity": None,
+            "best_next_available_opportunity": None,
+            "destination_count": 0,
+            "summary": message,
+            "forecast_status": "temporarily_unavailable",
+            "forecast_status_message": message,
+            "excluded_destinations": disabled_destinations,
+            "duration_mode": trip_duration.mode,
+            "trip_duration": trip_duration.max_days,
+            "trip_duration_label": trip_duration.label,
+            "trip_duration_source": trip_duration.source,
+            "min_duration_days": trip_duration.min_days,
+            "max_duration_days": trip_duration.max_days,
+            "selected_duration_days": trip_duration.max_days,
+            "best_duration_days": None,
+            "forecast_horizon_days": forecast_days,
+            "planning_profile": planning_profile,
+            "travel_strategy": planning_profile.travel_strategy,
+            "available_hours_per_day": planning_profile.available_hours_per_day,
+            "max_approach_time_hours": planning_profile.max_approach_time_hours,
+            "trailer_available": planning_profile.trailer_available,
+            "weekend_only": window_preferences.weekend_only,
+            "preferred_start_weekday": window_preferences.preferred_start_weekday,
+            "active_helpers": active_helpers,
+        }
+
     async def _async_update_data(self) -> CoordinatorData:
         """Refresh route and forecast data."""
         config = self.config
@@ -242,7 +306,9 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     )
                 )
         except RideRadarApiError as err:
-            raise UpdateFailed(str(err)) from err
+            raise UpdateFailed(
+                "Forecast provider is temporarily unavailable. RideRadar will retry automatically."
+            ) from err
         except (TimeoutError, OSError, ValueError) as err:
             raise UpdateFailed(f"Could not update RideRadar data: {err}") from err
 

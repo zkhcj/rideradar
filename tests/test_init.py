@@ -14,13 +14,8 @@ async def test_setup_and_unload_entry(hass, monkeypatch) -> None:
     )
     entry.add_to_hass(hass)
 
-    async def fake_first_refresh(self):
-        self.data = {
-            "results": [],
-            "best": None,
-            "destination_count": 0,
-            "summary": "No enabled destinations configured",
-        }
+    async def fake_refresh(self):
+        return None
 
     async def fake_forward_setups(config_entry, platforms):
         return True
@@ -28,13 +23,14 @@ async def test_setup_and_unload_entry(hass, monkeypatch) -> None:
     async def fake_unload_platforms(config_entry, platforms):
         return True
 
-    monkeypatch.setattr(RideRadarDataCoordinator, "async_config_entry_first_refresh", fake_first_refresh)
+    monkeypatch.setattr(RideRadarDataCoordinator, "async_refresh", fake_refresh)
     monkeypatch.setattr("custom_components.rideradar.async_get_clientsession", lambda hass: object())
     monkeypatch.setattr(hass.config_entries, "async_forward_entry_setups", fake_forward_setups)
     monkeypatch.setattr(hass.config_entries, "async_unload_platforms", fake_unload_platforms)
 
     assert await async_setup_entry(hass, entry) is True
     assert entry.entry_id in hass.data[DOMAIN]
+    assert hass.data[DOMAIN][entry.entry_id].data["forecast_status"] == "temporarily_unavailable"
 
     assert await async_unload_entry(hass, entry) is True
     assert DOMAIN not in hass.data

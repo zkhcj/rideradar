@@ -1,0 +1,45 @@
+"""Tests for copy-paste RideRadar dashboard examples."""
+
+from pathlib import Path
+
+README = Path(__file__).resolve().parents[1] / "README.md"
+
+
+def test_default_dashboard_uses_safe_mapping_access() -> None:
+    readme = README.read_text(encoding="utf-8")
+
+    unsafe_patterns = [
+        "trace.result",
+        "trace.inputs",
+        "trace.scores",
+        "trace.weights",
+        "trace.caps",
+        "opportunity.period",
+        "opportunity.recommendation_reason",
+    ]
+    for pattern in unsafe_patterns:
+        assert pattern not in readme
+
+    assert "trace.get('result', {}) if trace is mapping else {}" in readme
+    assert "trace.get('scores', {}) if trace is mapping else {}" in readme
+
+
+def test_default_dashboard_uses_native_entities_and_literal_markdown_tables() -> None:
+    readme = README.read_text(encoding="utf-8")
+
+    for entity_id in (
+        "select.rideradar_trip_duration",
+        "number.rideradar_trip_duration_days",
+        "number.rideradar_forecast_horizon_days",
+        "select.rideradar_preferred_start_day",
+        "switch.rideradar_weekend_only",
+        "select.rideradar_travel_strategy",
+        "switch.rideradar_trailer_available",
+        "number.rideradar_available_hours_per_day",
+        "number.rideradar_max_approach_time_hours",
+    ):
+        assert entity_id in readme
+
+    assert "content: |\n          {% set windows = state_attr('sensor.rideradar_best_opportunities'" in readme
+    assert "| # | Bestemming | Score | Weer | Efficiëntie | Periode |" in readme
+    assert "Aanhanger vandaag beschikbaar" in readme

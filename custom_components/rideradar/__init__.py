@@ -38,10 +38,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry,
         OpenMeteoClient(async_get_clientsession(hass)),
     )
-    await coordinator.async_config_entry_first_refresh()
+    coordinator.data = coordinator.unavailable_data()
     hass.data[DOMAIN][entry.entry_id] = coordinator
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    entry.async_create_background_task(hass, coordinator.async_refresh(), "rideradar_initial_refresh")
     return True
 
 
