@@ -608,6 +608,7 @@ def _rejection_summary(opportunity: dict[str, Any] | None) -> dict[str, Any] | N
         "period": opportunity["period"],
         "ride_quality_score": opportunity["ride_quality_score"],
         "reason": _primary_rejection_reason(opportunity),
+        "main_blocking_factor": _primary_rejection_detail(opportunity),
         "score_breakdown": opportunity["score_breakdown"],
     }
 
@@ -618,6 +619,15 @@ def _primary_rejection_reason(opportunity: dict[str, Any]) -> str:
     if int(opportunity["stability_score"]) < 40:
         return "stability_too_low"
     return "below_minimum_score"
+
+
+def _primary_rejection_detail(opportunity: dict[str, Any]) -> str:
+    reason = _primary_rejection_reason(opportunity)
+    if reason == "weather_too_poor":
+        return f"Weather score is {opportunity['weather_score']}/100."
+    if reason == "stability_too_low":
+        return f"Stability score is {opportunity['stability_score']}/100."
+    return f"Ride quality score is {opportunity['ride_quality_score']}/100, below the 70 threshold."
 
 
 def _disabled_destinations(config: dict[str, Any]) -> list[dict[str, str]]:
