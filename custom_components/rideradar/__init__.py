@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import OpenMeteoClient
@@ -29,6 +30,8 @@ from .const import (
 from .coordinator import RideRadarDataCoordinator
 from .destinations import DEFAULT_DESTINATIONS, default_destination_names, parse_destinations_data
 
+SERVICE_REFRESH_WEATHER = "refresh_weather"
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up RideRadar from a config entry."""
@@ -38,11 +41,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry,
         OpenMeteoClient(async_get_clientsession(hass)),
     )
+    await coordinator.async_load_forecast_cache()
     coordinator.data = coordinator.unavailable_data()
     hass.data[DOMAIN][entry.entry_id] = coordinator
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_create_background_task(hass, coordinator.async_refresh(), "rideradar_initial_refresh")
+    _async_register_services(hass)
     return True
 
 
@@ -54,6 +59,24 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not hass.data.get(DOMAIN):
             hass.data.pop(DOMAIN, None)
     return unload_ok
+
+
+def _async_register_services(hass: HomeAssistant) -> None:
+    """Register RideRadar services once."""
+    if hass.services.has_service(DOMAIN, SERVICE_REFRESH_WEATHER):
+        return
+
+    async def handle_refresh_weather(call: ServiceCall) -> None:
+        force = bool(call.data.get("force", False))
+        for coordinator in hass.data.get(DOMAIN, {}).values():
+            await coordinator.async_refresh_weather(force=force)
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_REFRESH_WEATHER,
+        handle_refresh_weather,
+        schema=vol.Schema({vol.Optional("force", default=False): bool}),
+    )
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:

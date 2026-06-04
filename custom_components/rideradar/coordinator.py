@@ -11,7 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import OpenMeteoClient, RideRadarApiError
+from .api import OpenMeteoClient
 from .const import (
     CONF_ACTIVITY_PROFILE,
     CONF_CUSTOM_TRIP_DURATION_DAYS,
@@ -62,6 +62,7 @@ from .scoring import (
     calculate_variable_trip_windows,
     ride_verdict,
 )
+from .weather_cache import ForecastCache
 
 LOGGER = logging.getLogger(__name__)
 
@@ -156,6 +157,8 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         )
         self.entry = entry
         self.api_client = api_client
+        self.forecast_cache = ForecastCache(hass, _weather_providers(api_client))
+        self._force_weather_refresh = False
         self.runtime_controls: dict[str, str] = {}
         self.routing_client = routing_client or FallbackRoutingClient(
             detour_factor=float(self.config.get(CONF_DETOUR_FACTOR, DEFAULT_DETOUR_FACTOR))
@@ -184,6 +187,15 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
     def _active_helper_states(self) -> dict[str, str | None]:
         return _active_helper_states(self.hass, self.runtime_controls)
+
+    async def async_load_forecast_cache(self) -> None:
+        """Load persisted forecast cache before the first refresh."""
+        await self.forecast_cache.async_load()
+
+    async def async_refresh_weather(self, *, force: bool = False) -> None:
+        """Request a weather refresh through the normal coordinator path."""
+        self._force_weather_refresh = force
+        await self.async_request_refresh()
 
     def unavailable_data(
         self,
@@ -252,6 +264,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             "weekend_only": window_preferences.weekend_only,
             "preferred_start_weekday": window_preferences.preferred_start_weekday,
             "active_helpers": active_helpers,
+            "weather": self.forecast_cache.status(),
         }
 
     async def _async_update_data(self) -> CoordinatorData:
@@ -268,6 +281,8 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             active_helpers = self._active_helper_states()
             activity_profile = str(config.get(CONF_ACTIVITY_PROFILE, DEFAULT_ACTIVITY_PROFILE))
             destinations = destinations_from_config(config)
+            force_weather_refresh = self._force_weather_refresh
+            self._force_weather_refresh = False
         except (KeyError, TypeError, ValueError, RideRadarConfigError) as err:
             raise UpdateFailed(f"Invalid RideRadar configuration: {err}") from err
 
@@ -313,11 +328,12 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 "weekend_only": window_preferences.weekend_only,
                 "preferred_start_weekday": window_preferences.preferred_start_weekday,
                 "active_helpers": active_helpers,
+                "weather": self.forecast_cache.status(),
             }
 
         results: list[DestinationResult] = []
-        try:
-            for destination in enabled_destinations:
+        for destination in enabled_destinations:
+            try:
                 results.append(
                     await self._evaluate_destination(
                         destination,
@@ -329,14 +345,11 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                         planning_profile,
                         window_preferences,
                         activity_profile,
+                        force_weather_refresh,
                     )
                 )
-        except RideRadarApiError as err:
-            raise UpdateFailed(
-                "Forecast provider is temporarily unavailable. RideRadar will retry automatically."
-            ) from err
-        except (TimeoutError, OSError, ValueError) as err:
-            raise UpdateFailed(f"Could not update RideRadar data: {err}") from err
+            except (TimeoutError, OSError, ValueError) as err:
+                raise UpdateFailed(f"Could not update RideRadar data: {err}") from err
 
         best = max(
             (
@@ -426,6 +439,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             "weekend_only": window_preferences.weekend_only,
             "preferred_start_weekday": window_preferences.preferred_start_weekday,
             "active_helpers": active_helpers,
+            "weather": self.forecast_cache.status(),
         }
 
     async def _evaluate_destination(
@@ -439,6 +453,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         planning_profile: TripPlanningProfile,
         window_preferences: WindowPreferences,
         activity_profile: str,
+        force_weather_refresh: bool = False,
     ) -> DestinationResult:
         """Evaluate route and forecast for one destination."""
         route = await self.routing_client.get_route(
@@ -474,11 +489,13 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 exclusion_reasons=["too_far"],
             )
 
-        forecasts = await self.api_client.get_daily_forecast(
+        cached_forecast = await self.forecast_cache.async_get_forecast(
             destination.latitude,
             destination.longitude,
             forecast_days,
+            force=force_weather_refresh,
         )
+        forecasts = cached_forecast.forecasts
         scores = {forecast.date: calculate_ride_score(forecast, activity_profile) for forecast in forecasts}
         best_forecast = max(forecasts, key=lambda item: scores[item.date].score, default=None)
         best_score = scores[best_forecast.date].score if best_forecast else None
@@ -1509,6 +1526,18 @@ def _active_helper_states(
         ),
     }
     return controls
+
+
+def _weather_providers(api_client: Any) -> dict[str, Any]:
+    """Normalize one or more weather provider clients."""
+    if isinstance(api_client, dict):
+        return {str(provider): client for provider, client in api_client.items()}
+    if isinstance(api_client, (list, tuple)):
+        return {
+            str(getattr(client, "provider_name", f"provider_{index + 1}")): client
+            for index, client in enumerate(api_client)
+        }
+    return {str(getattr(api_client, "provider_name", "open_meteo")): api_client}
 
 
 def _trip_planning_profile(

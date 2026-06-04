@@ -34,6 +34,7 @@ def test_default_dashboard_uses_native_entities_and_literal_markdown_tables() ->
         "sensor.rideradar_top_forecast_direct_opportunities",
         "sensor.rideradar_top_forecast_scenic_opportunities",
         "sensor.rideradar_top_forecast_trailer_opportunities",
+        "sensor.rideradar_weather_status",
         "select.rideradar_trip_duration",
         "number.rideradar_trip_duration_days",
         "number.rideradar_forecast_horizon_days",

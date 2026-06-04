@@ -36,6 +36,7 @@ async def async_get_config_entry_diagnostics(
             "all_opportunities_visible": len(data.get("all_opportunities") or []),
             "all_opportunities_sample": _compact_opportunities((data.get("all_opportunities") or [])[:10]),
             "summary": data.get("summary"),
+            "weather": data.get("weather", {}),
             "active_helpers": data.get("active_helpers", {}),
             "enabled_destinations": [destination.name for destination in destinations_from_config(config)],
             "excluded_destinations": data.get("excluded_destinations", []),

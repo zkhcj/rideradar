@@ -1,7 +1,5 @@
 """Tests for RideRadar coordinator behavior."""
 
-import pytest
-from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.rideradar.api import RideRadarApiError
@@ -308,7 +306,7 @@ async def test_coordinator_does_not_rank_limited_forecast_as_complete_trip(hass)
     assert data["results"][0].trip_score is None
 
 
-async def test_coordinator_raises_update_failed_when_api_unavailable(hass) -> None:
+async def test_coordinator_marks_weather_unavailable_when_api_unavailable(hass) -> None:
     coordinator = RideRadarDataCoordinator(
         hass,
         _entry(),
@@ -316,11 +314,14 @@ async def test_coordinator_raises_update_failed_when_api_unavailable(hass) -> No
         FakeRoutingClient(),
     )
 
-    with pytest.raises(UpdateFailed):
-        await coordinator._async_update_data()
+    data = await coordinator._async_update_data()
+
+    assert data["weather"]["weather_status"] == "unavailable"
+    assert data["best"] is None
+    assert any(item["reason"] == "no_forecast_data" for item in data["excluded_destinations"])
 
 
-async def test_coordinator_update_failed_message_is_provider_friendly(hass) -> None:
+async def test_coordinator_provider_failure_status_is_provider_friendly(hass) -> None:
     coordinator = RideRadarDataCoordinator(
         hass,
         _entry(),
@@ -328,11 +329,13 @@ async def test_coordinator_update_failed_message_is_provider_friendly(hass) -> N
         FakeRoutingClient(),
     )
 
-    with pytest.raises(UpdateFailed, match="Forecast provider is temporarily unavailable"):
-        await coordinator._async_update_data()
+    data = await coordinator._async_update_data()
+
+    assert data["weather"]["weather_status"] == "unavailable"
+    assert data["weather"]["providers"]["open_meteo"]["status"] == "unavailable"
 
 
-async def test_coordinator_retains_previous_data_after_provider_failure(hass) -> None:
+async def test_coordinator_replaces_previous_data_with_limited_state_after_provider_failure(hass) -> None:
     coordinator = RideRadarDataCoordinator(
         hass,
         _entry(),
@@ -343,8 +346,9 @@ async def test_coordinator_retains_previous_data_after_provider_failure(hass) ->
 
     await coordinator.async_refresh()
 
-    assert coordinator.data == {"summary": "previous valid data", "results": ["previous"]}
-    assert coordinator.last_update_success is False
+    assert coordinator.data["weather"]["weather_status"] == "unavailable"
+    assert coordinator.data["summary"] == "Geen bereikbare bestemming met beschikbare weersverwachting."
+    assert coordinator.last_update_success is True
 
 
 async def test_coordinator_unavailable_data_is_dashboard_safe(hass) -> None:
@@ -364,7 +368,7 @@ async def test_coordinator_unavailable_data_is_dashboard_safe(hass) -> None:
     assert "weerservice is tijdelijk niet beschikbaar" in data["summary"]
 
 
-async def test_coordinator_handles_timeout_as_update_failure(hass) -> None:
+async def test_coordinator_handles_timeout_as_weather_unavailable(hass) -> None:
     coordinator = RideRadarDataCoordinator(
         hass,
         _entry(),
@@ -372,11 +376,13 @@ async def test_coordinator_handles_timeout_as_update_failure(hass) -> None:
         FakeRoutingClient(),
     )
 
-    with pytest.raises(UpdateFailed, match="Could not update RideRadar data"):
-        await coordinator._async_update_data()
+    data = await coordinator._async_update_data()
+
+    assert data["weather"]["weather_status"] == "unavailable"
+    assert data["weather"]["providers"]["open_meteo"]["status"] == "timeout"
 
 
-async def test_coordinator_handles_malformed_provider_data_as_update_failure(hass) -> None:
+async def test_coordinator_handles_malformed_provider_data_as_weather_unavailable(hass) -> None:
     coordinator = RideRadarDataCoordinator(
         hass,
         _entry(),
@@ -384,5 +390,7 @@ async def test_coordinator_handles_malformed_provider_data_as_update_failure(has
         FakeRoutingClient(),
     )
 
-    with pytest.raises(UpdateFailed, match="Could not update RideRadar data"):
-        await coordinator._async_update_data()
+    data = await coordinator._async_update_data()
+
+    assert data["weather"]["weather_status"] == "unavailable"
+    assert data["weather"]["providers"]["open_meteo"]["status"] == "invalid_response"

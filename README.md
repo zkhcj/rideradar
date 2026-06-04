@@ -132,6 +132,35 @@ sections:
           **Belangrijkste aandachtspunt:** {{ blocker }}
           {% endif %}
       - type: markdown
+        title: Weerdata
+        content: |
+          {% set status = states('sensor.rideradar_weather_status') %}
+          {% set provider = state_attr('sensor.rideradar_weather_status', 'provider_used') or state_attr('sensor.rideradar_weather_status', 'primary_provider') or 'onbekend' %}
+          {% set fallback = state_attr('sensor.rideradar_weather_status', 'fallback_provider_used') %}
+          {% set age = state_attr('sensor.rideradar_weather_status', 'forecast_cache_age_hours') %}
+          {% set updated = state_attr('sensor.rideradar_weather_status', 'last_successful_update') %}
+          {% set next = state_attr('sensor.rideradar_weather_status', 'next_scheduled_refresh') %}
+          {% set calls = state_attr('sensor.rideradar_weather_status', 'calls_used_today') or {} %}
+          {% if status == 'ok' %}
+          Weerdata beschikbaar via **{{ provider }}**.
+          {% elif status == 'stale' %}
+          RideRadar gebruikt de laatst bekende weersverwachting. Het advies is beperkt.
+          {% else %}
+          Geen bruikbare weerdata beschikbaar. RideRadar toont alleen kandidaten zonder definitief weeradvies.
+          {% endif %}
+
+          {% if fallback %}
+          Primaire provider niet gebruikt. RideRadar gebruikt **{{ fallback }}** als fallback.
+          {% endif %}
+
+          **Laatste update:** {{ updated if updated not in ['unknown', 'unavailable', none, ''] else 'Nog niet beschikbaar' }}
+
+          **Cacheleeftijd:** {{ age | round(1) if age is number else 'onbekend' }} uur
+
+          **Volgende geplande update:** {{ next if next not in ['unknown', 'unavailable', none, ''] else 'Nog niet gepland' }}
+
+          **Calls vandaag:** {{ calls }}
+      - type: markdown
         title: Deze week - direct
         content: |
           {% set group = state_attr('sensor.rideradar_top_week_direct_opportunities', 'opportunities') or [] %}
@@ -585,6 +614,40 @@ Summary sensors:
 - `sensor.rideradar_best_weekday_opportunity`
 - `sensor.rideradar_best_next_available_opportunity`
 - `sensor.rideradar_best_ride_quality_score`
+- `sensor.rideradar_weather_status`
+
+## Weather Cache And Provider Budget
+
+RideRadar dashboard cards never call weather providers directly. Lovelace only renders the latest calculated coordinator state.
+
+Weather forecasts are fetched by the background coordinator and cached per normalized location and forecast horizon. The default refresh interval is 4 hours. A forecast that is 0-4 hours old is treated as fresh. A forecast that is 4-24 hours old is treated as stale: scoring can still use it, but the dashboard shows that the advice is limited. Forecast data older than 24 hours is considered unavailable and is not converted into a fake bad-weather score.
+
+Important defaults:
+
+| Setting | Default |
+| --- | ---: |
+| Weather refresh interval | 4 hours |
+| Fresh forecast max age | 4 hours |
+| Stale forecast fallback max age | 24 hours |
+| Max provider calls per hour | 60 |
+| Max provider calls per day | 500 |
+| Provider backoff after rate limit | 60 minutes |
+
+One destination forecast is reused for direct, binnendoor/scenic, aanhanger, week, month, advice, rejected-candidate and all-options calculations. Changing dashboard controls recalculates RideRadar from cached forecasts unless the weather cache is stale enough for a scheduled refresh.
+
+Provider state is exposed through `sensor.rideradar_weather_status`. It shows the primary provider, provider used, fallback provider when one is used, last successful update, cache age, calls used today, provider states and next scheduled refresh.
+
+Manual refresh is available through:
+
+```yaml
+service: rideradar.refresh_weather
+data:
+  force: false
+```
+
+With `force: false`, RideRadar still respects cache freshness and provider budgets. Use `force: true` only for manual testing because it bypasses normal cache and budget protection.
+
+RideRadar v1 ships with the Open-Meteo provider client. The coordinator cache layer supports multiple provider clients internally so fallback providers can be added without changing dashboard behavior. If a provider is rate-limited or unavailable, RideRadar uses a configured fallback provider when present, otherwise it keeps using the best available cached forecast within the stale fallback window.
 
 Destination sensors expose:
 

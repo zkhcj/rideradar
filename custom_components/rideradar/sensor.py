@@ -136,6 +136,13 @@ async def async_setup_entry(
         RideRadarSensor(
             entry,
             coordinator,
+            SensorEntityDescription(key="weather_status", name="Weather Status", icon="mdi:cloud-refresh"),
+            lambda data: (data.get("weather") or {}).get("weather_status", "unavailable"),
+            lambda data: data.get("weather", {}),
+        ),
+        RideRadarSensor(
+            entry,
+            coordinator,
             SensorEntityDescription(key="best_opportunities", name="Best Opportunities", icon="mdi:calendar-star"),
             lambda data: _opportunity_summary(data.get("opportunities")),
             lambda data: {

@@ -1,0 +1,11 @@
+refresh_weather:
+  name: Refresh weather
+  description: Refresh RideRadar weather data through the cached coordinator path.
+  fields:
+    force:
+      name: Force
+      description: Ignore cache freshness and provider budgets for this manual refresh.
+      required: false
+      default: false
+      selector:
+        boolean:
