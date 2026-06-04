@@ -69,6 +69,8 @@ def _compact_opportunity(item: dict[str, Any]) -> dict[str, Any]:
         "duration_days": item.get("duration_days"),
         "ride_quality_score": item.get("ride_quality_score"),
         "score_breakdown": item.get("score_breakdown"),
+        "score_weights": item.get("score_weights"),
+        "score_caps": item.get("score_caps"),
         "recommendation_reason": item.get("recommendation_reason"),
         "tradeoffs": item.get("tradeoffs", []),
     }

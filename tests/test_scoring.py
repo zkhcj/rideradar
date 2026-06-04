@@ -2,6 +2,7 @@
 
 from custom_components.rideradar.models import DailyForecast, DestinationArea, RouteInfo
 from custom_components.rideradar.scoring import (
+    RIDE_QUALITY_WEIGHTS,
     TripPlanningProfile,
     calculate_best_trip_window,
     calculate_ride_experience,
@@ -207,3 +208,48 @@ def test_trailer_strategy_requires_enabled_and_available_trailer() -> None:
 
     assert efficiency["trip_efficiency_score"] <= 30
     assert "trailer is not available" in efficiency["exclusion_reasons"][0]
+
+
+def test_zero_weather_score_caps_ride_quality() -> None:
+    forecasts = [
+        DailyForecast("2026-06-06", 2, 100, 20, 70, 95, 100, 95),
+    ]
+    window = calculate_best_trip_window(forecasts, 1)
+
+    assert window is not None
+    experience = calculate_ride_experience(
+        DestinationArea("Sauerland", "Duitsland", 51.18, 8.25),
+        RouteInfo(180, 90, "test"),
+        window,
+        forecasts,
+    )
+
+    assert experience.weather_score == 0
+    assert experience.ride_quality_score <= 50
+    assert {"reason": "weather_score_zero", "cap": 50} in experience.score_caps
+    assert experience.score_weights["weather_score"] == 40
+    assert experience.recommendation_type == "least_bad_option"
+
+
+def test_poor_weather_score_caps_ride_quality_at_60() -> None:
+    forecasts = [
+        DailyForecast("2026-06-06", 14, 30, 1.5, 35, 40, 80, 61),
+    ]
+    window = calculate_best_trip_window(forecasts, 1)
+
+    assert window is not None
+    experience = calculate_ride_experience(
+        DestinationArea("Sauerland", "Duitsland", 51.18, 8.25),
+        RouteInfo(120, 75, "test"),
+        window,
+        forecasts,
+    )
+
+    assert 0 < experience.weather_score < 25
+    assert experience.ride_quality_score <= 60
+    assert {"reason": "weather_score_below_25", "cap": 60} in experience.score_caps
+
+
+def test_ride_quality_weights_sum_to_100() -> None:
+    assert sum(RIDE_QUALITY_WEIGHTS.values()) == 100
+    assert RIDE_QUALITY_WEIGHTS["weather_score"] == 40

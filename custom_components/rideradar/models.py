@@ -156,6 +156,10 @@ class RideExperience:
     estimated_destination_ride_time_hours: float
     approach_enjoyment_factor: float
     destination_ride_time_ratio: float
+    score_weights: dict[str, int]
+    score_caps: list[dict[str, int | str]]
+    verdict: str
+    recommendation_type: str
     road_fun_score: int
     holiday_names: list[str]
     access_notes: list[str]

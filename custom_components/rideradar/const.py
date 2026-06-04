@@ -8,7 +8,7 @@ from typing import Final
 from homeassistant.const import Platform
 
 DOMAIN: Final = "rideradar"
-PLATFORMS: Final = [Platform.SENSOR]
+PLATFORMS: Final = [Platform.SENSOR, Platform.SELECT, Platform.NUMBER, Platform.SWITCH]
 INTEGRATION_VERSION: Final = "0.1.1"
 
 ATTRIBUTION: Final = "Weather data provided by Open-Meteo"
@@ -56,6 +56,15 @@ TRAVEL_STRATEGY_OPTIONS: Final = (
     TRAVEL_STRATEGY_MOTORCYCLE_SCENIC,
     TRAVEL_STRATEGY_TRAILER,
 )
+CONTROL_TRIP_DURATION: Final = "trip_duration"
+CONTROL_TRIP_DURATION_DAYS: Final = "trip_duration_days"
+CONTROL_FORECAST_HORIZON_DAYS: Final = "forecast_horizon_days"
+CONTROL_PREFERRED_START_DAY: Final = "preferred_start_day"
+CONTROL_WEEKEND_ONLY: Final = "weekend_only"
+CONTROL_TRAVEL_STRATEGY: Final = "travel_strategy"
+CONTROL_TRAILER_AVAILABLE: Final = "trailer_available"
+CONTROL_AVAILABLE_HOURS_PER_DAY: Final = "available_hours_per_day"
+CONTROL_MAX_APPROACH_TIME_HOURS: Final = "max_approach_time_hours"
 MIN_DETOUR_FACTOR: Final = 1.0
 MAX_DETOUR_FACTOR: Final = 2.5
 MIN_LATITUDE: Final = -90.0

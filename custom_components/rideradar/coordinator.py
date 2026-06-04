@@ -23,6 +23,15 @@ from .const import (
     CONF_START_LATITUDE,
     CONF_START_LONGITUDE,
     CONF_TRAILER_SUPPORT_ENABLED,
+    CONTROL_AVAILABLE_HOURS_PER_DAY,
+    CONTROL_FORECAST_HORIZON_DAYS,
+    CONTROL_MAX_APPROACH_TIME_HOURS,
+    CONTROL_PREFERRED_START_DAY,
+    CONTROL_TRAILER_AVAILABLE,
+    CONTROL_TRAVEL_STRATEGY,
+    CONTROL_TRIP_DURATION,
+    CONTROL_TRIP_DURATION_DAYS,
+    CONTROL_WEEKEND_ONLY,
     DEFAULT_ACTIVITY_PROFILE,
     DEFAULT_AVAILABLE_HOURS_PER_DAY,
     DEFAULT_CUSTOM_TRIP_DURATION_DAYS,
@@ -49,6 +58,7 @@ from .scoring import (
     calculate_ride_experience,
     calculate_ride_score,
     calculate_variable_trip_windows,
+    ride_verdict,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -57,13 +67,34 @@ CoordinatorData = dict[str, Any]
 
 TRIP_DURATION_NUMBER_ENTITY = "input_number.rideradar_trip_duration_days"
 TRIP_DURATION_SELECT_ENTITY = "input_select.rideradar_trip_duration"
+NATIVE_TRIP_DURATION_NUMBER_ENTITY = "number.rideradar_trip_duration_days"
+NATIVE_TRIP_DURATION_SELECT_ENTITY = "select.rideradar_trip_duration"
 TRAVEL_STRATEGY_SELECT_ENTITY = "input_select.rideradar_travel_strategy"
+NATIVE_TRAVEL_STRATEGY_SELECT_ENTITY = "select.rideradar_travel_strategy"
 TRAILER_AVAILABLE_ENTITY = "input_boolean.rideradar_trailer_available"
+NATIVE_TRAILER_AVAILABLE_ENTITY = "switch.rideradar_trailer_available"
 AVAILABLE_HOURS_ENTITY = "input_number.rideradar_available_hours_per_day"
+NATIVE_AVAILABLE_HOURS_ENTITY = "number.rideradar_available_hours_per_day"
 MAX_APPROACH_TIME_ENTITY = "input_number.rideradar_max_approach_time_hours"
+NATIVE_MAX_APPROACH_TIME_ENTITY = "number.rideradar_max_approach_time_hours"
 FORECAST_HORIZON_ENTITY = "input_number.rideradar_forecast_horizon_days"
+NATIVE_FORECAST_HORIZON_ENTITY = "number.rideradar_forecast_horizon_days"
 WEEKEND_ONLY_ENTITY = "input_boolean.rideradar_weekend_only"
+NATIVE_WEEKEND_ONLY_ENTITY = "switch.rideradar_weekend_only"
 PREFERRED_START_DAY_ENTITY = "input_select.rideradar_preferred_start_day"
+NATIVE_PREFERRED_START_DAY_ENTITY = "select.rideradar_preferred_start_day"
+
+NATIVE_CONTROL_ENTITIES = {
+    CONTROL_TRIP_DURATION: NATIVE_TRIP_DURATION_SELECT_ENTITY,
+    CONTROL_TRIP_DURATION_DAYS: NATIVE_TRIP_DURATION_NUMBER_ENTITY,
+    CONTROL_FORECAST_HORIZON_DAYS: NATIVE_FORECAST_HORIZON_ENTITY,
+    CONTROL_PREFERRED_START_DAY: NATIVE_PREFERRED_START_DAY_ENTITY,
+    CONTROL_WEEKEND_ONLY: NATIVE_WEEKEND_ONLY_ENTITY,
+    CONTROL_TRAVEL_STRATEGY: NATIVE_TRAVEL_STRATEGY_SELECT_ENTITY,
+    CONTROL_TRAILER_AVAILABLE: NATIVE_TRAILER_AVAILABLE_ENTITY,
+    CONTROL_AVAILABLE_HOURS_PER_DAY: NATIVE_AVAILABLE_HOURS_ENTITY,
+    CONTROL_MAX_APPROACH_TIME_HOURS: NATIVE_MAX_APPROACH_TIME_ENTITY,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +140,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         )
         self.entry = entry
         self.api_client = api_client
+        self.runtime_controls: dict[str, str] = {}
         self.routing_client = routing_client or FallbackRoutingClient(
             detour_factor=float(self.config.get(CONF_DETOUR_FACTOR, DEFAULT_DETOUR_FACTOR))
         )
@@ -118,6 +150,25 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         """Return merged config entry data and options."""
         return {**self.entry.data, **self.entry.options}
 
+    def set_runtime_control(self, key: str, value: Any) -> None:
+        """Store the latest native control value for scoring precedence."""
+        self.runtime_controls[key] = str(value)
+
+    def _trip_duration_selection(self, config: dict[str, Any], forecast_days: int) -> TripDurationSelection:
+        return _trip_duration_selection(config, forecast_days, self.hass, self.runtime_controls)
+
+    def _forecast_days_selection(self, config: dict[str, Any]) -> int:
+        return _forecast_days_selection(config, self.hass, self.runtime_controls)
+
+    def _trip_planning_profile(self, config: dict[str, Any]) -> TripPlanningProfile:
+        return _trip_planning_profile(config, self.hass, self.runtime_controls)
+
+    def _window_preferences(self) -> WindowPreferences:
+        return _window_preferences(self.hass, self.runtime_controls)
+
+    def _active_helper_states(self) -> dict[str, str | None]:
+        return _active_helper_states(self.hass, self.runtime_controls)
+
     async def _async_update_data(self) -> CoordinatorData:
         """Refresh route and forecast data."""
         config = self.config
@@ -125,11 +176,11 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             start_latitude = float(config[CONF_START_LATITUDE])
             start_longitude = float(config[CONF_START_LONGITUDE])
             max_route_distance_km = float(config.get(CONF_MAX_ROUTE_DISTANCE_KM, DEFAULT_MAX_ROUTE_DISTANCE_KM))
-            forecast_days = _forecast_days_selection(config, self.hass)
-            trip_duration = _trip_duration_selection(config, forecast_days, self.hass)
-            planning_profile = _trip_planning_profile(config, self.hass)
-            window_preferences = _window_preferences(self.hass)
-            active_helpers = _active_helper_states(self.hass)
+            forecast_days = self._forecast_days_selection(config)
+            trip_duration = self._trip_duration_selection(config, forecast_days)
+            planning_profile = self._trip_planning_profile(config)
+            window_preferences = self._window_preferences()
+            active_helpers = self._active_helper_states()
             activity_profile = str(config.get(CONF_ACTIVITY_PROFILE, DEFAULT_ACTIVITY_PROFILE))
             destinations = destinations_from_config(config)
         except (KeyError, TypeError, ValueError, RideRadarConfigError) as err:
@@ -144,6 +195,12 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 "opportunities": [],
                 "top_week_opportunities": [],
                 "top_month_opportunities": [],
+                "top_week_candidate_count": 0,
+                "top_week_rejected_count": 0,
+                "top_week_best_below_threshold": None,
+                "top_month_candidate_count": 0,
+                "top_month_rejected_count": 0,
+                "top_month_best_below_threshold": None,
                 "best_weekend_opportunity": None,
                 "best_weekday_opportunity": None,
                 "best_next_available_opportunity": None,
@@ -211,6 +268,8 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         )
         top_week = _top_opportunities(opportunities, max_days_until=7)
         top_month = _top_opportunities(opportunities)
+        top_week_stats = _top_opportunity_stats(opportunities, max_days_until=7)
+        top_month_stats = _top_opportunity_stats(opportunities)
         excluded_destinations = _excluded_destinations(results) + disabled_destinations
         if LOGGER.isEnabledFor(logging.DEBUG):
             LOGGER.debug(
@@ -227,6 +286,12 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             "opportunities": opportunities,
             "top_week_opportunities": top_week,
             "top_month_opportunities": top_month,
+            "top_week_candidate_count": top_week_stats["candidate_count"],
+            "top_week_rejected_count": top_week_stats["rejected_count"],
+            "top_week_best_below_threshold": top_week_stats["best_below_threshold"],
+            "top_month_candidate_count": top_month_stats["candidate_count"],
+            "top_month_rejected_count": top_month_stats["rejected_count"],
+            "top_month_best_below_threshold": top_month_stats["best_below_threshold"],
             "excluded_destinations": excluded_destinations,
             "best_weekend_opportunity": _best_matching_opportunity(opportunities, "weekend"),
             "best_weekday_opportunity": _best_matching_opportunity(opportunities, "weekday"),
@@ -377,9 +442,16 @@ def _summary(best: DestinationResult | None) -> str:
         else ""
     )
     return (
-        f"{best.destination.name}: {best.ride_quality_score}/100 ride quality for a {best.trip_duration}-day trip "
+        f"{_summary_prefix(best)} {best.destination.name}: "
+        f"{best.ride_quality_score}/100 ride quality for a {best.trip_duration}-day trip "
         f"{period}. {best.trip_explanation}"
     )
+
+
+def _summary_prefix(best: DestinationResult) -> str:
+    if (best.ride_quality_score or 0) < 70:
+        return "Geen sterke rit gevonden. Dit is de minst slechte optie."
+    return "Aanbevolen rit."
 
 
 def _opportunities(
@@ -429,6 +501,9 @@ def _opportunities(
                 "distance_score": experience.distance_score,
                 "temperature_score": experience.temperature_score,
                 "trip_efficiency_score": experience.trip_efficiency_score,
+                "score_weights": experience.score_weights,
+                "score_caps": experience.score_caps,
+                "recommendation_type": experience.recommendation_type,
                 "travel_strategy": experience.travel_strategy,
                 "approach_time_hours": experience.approach_time_hours,
                 "return_time_hours": experience.return_time_hours,
@@ -503,6 +578,46 @@ def _top_opportunities(
         )
     ]
     return top[:limit]
+
+
+def _top_opportunity_stats(
+    opportunities: list[dict[str, Any]],
+    max_days_until: int | None = None,
+    minimum_score: int = 70,
+) -> dict[str, Any]:
+    candidates = [
+        opportunity
+        for opportunity in opportunities
+        if max_days_until is None
+        or (opportunity.get("days_until") is not None and opportunity["days_until"] <= max_days_until)
+    ]
+    rejected = [opportunity for opportunity in candidates if int(opportunity["ride_quality_score"]) < minimum_score]
+    best_rejected = rejected[0] if rejected else None
+    return {
+        "candidate_count": len(candidates),
+        "rejected_count": len(rejected),
+        "best_below_threshold": _rejection_summary(best_rejected) if best_rejected else None,
+    }
+
+
+def _rejection_summary(opportunity: dict[str, Any] | None) -> dict[str, Any] | None:
+    if opportunity is None:
+        return None
+    return {
+        "destination": opportunity["destination"],
+        "period": opportunity["period"],
+        "ride_quality_score": opportunity["ride_quality_score"],
+        "reason": _primary_rejection_reason(opportunity),
+        "score_breakdown": opportunity["score_breakdown"],
+    }
+
+
+def _primary_rejection_reason(opportunity: dict[str, Any]) -> str:
+    if int(opportunity["weather_score"]) < 25:
+        return "weather_too_poor"
+    if int(opportunity["stability_score"]) < 40:
+        return "stability_too_low"
+    return "below_minimum_score"
 
 
 def _disabled_destinations(config: dict[str, Any]) -> list[dict[str, str]]:
@@ -618,10 +733,14 @@ def _decision_trace(
             "period": opportunity["period"],
         },
         "scores": opportunity["score_breakdown"],
+        "weights": opportunity["score_weights"],
+        "caps": opportunity["score_caps"],
         "penalties": _trace_penalties(opportunity),
         "boosts": _trace_boosts(opportunity),
         "result": {
             "rank": None,
+            "verdict": opportunity["verdict"],
+            "recommendation_type": opportunity["recommendation_type"],
             "recommendation_reason": opportunity["recommendation_reason"],
         },
     }
@@ -718,13 +837,7 @@ def _is_weekend_window(window: Any) -> bool:
 
 def _window_verdict(score: int, weekend: bool = False) -> str:
     suffix = " weekend" if weekend else " window"
-    if score >= 85:
-        return f"Excellent{suffix}"
-    if score >= 70:
-        return f"Good{suffix}"
-    if score >= 55:
-        return f"Marginal{suffix}"
-    return f"Poor{suffix}"
+    return f"{ride_verdict(score)}{suffix}"
 
 
 def _pressure_level(score: int) -> str:
@@ -766,6 +879,7 @@ def _trip_duration_selection(
     config: dict[str, Any],
     forecast_days: int,
     hass: HomeAssistant | None = None,
+    native_controls: dict[str, str] | None = None,
 ) -> TripDurationSelection:
     config_duration = _trip_duration_from_config(config, forecast_days)
     mode = str(config.get(CONF_DURATION_MODE, DEFAULT_DURATION_MODE))
@@ -773,8 +887,14 @@ def _trip_duration_selection(
     if str(config.get(CONF_PREFERRED_TRIP_DURATION, DEFAULT_PREFERRED_TRIP_DURATION)) == "flexible":
         mode = "flexible"
 
-    number_duration = _helper_number_duration(hass, forecast_days)
-    select_value = _helper_select_value(hass)
+    number_duration = _helper_number_duration(hass, forecast_days, native_controls)
+    select_value = _state_with_precedence(
+        hass,
+        CONTROL_TRIP_DURATION,
+        NATIVE_TRIP_DURATION_SELECT_ENTITY,
+        TRIP_DURATION_SELECT_ENTITY,
+        native_controls,
+    )
     if select_value is not None:
         source = TRIP_DURATION_SELECT_ENTITY
         normalized = _normalize_duration_select(select_value)
@@ -801,9 +921,19 @@ def _trip_duration_selection(
     return TripDurationSelection(mode=mode, min_days=min_days, max_days=max_days, source=source)
 
 
-def _forecast_days_selection(config: dict[str, Any], hass: HomeAssistant | None = None) -> int:
+def _forecast_days_selection(
+    config: dict[str, Any],
+    hass: HomeAssistant | None = None,
+    native_controls: dict[str, str] | None = None,
+) -> int:
     configured = int(config.get(CONF_FORECAST_DAYS, DEFAULT_FORECAST_DAYS))
-    helper_value = _helper_state(hass, FORECAST_HORIZON_ENTITY)
+    helper_value = _state_with_precedence(
+        hass,
+        CONTROL_FORECAST_HORIZON_DAYS,
+        NATIVE_FORECAST_HORIZON_ENTITY,
+        FORECAST_HORIZON_ENTITY,
+        native_controls,
+    )
     if helper_value is not None:
         try:
             configured = round(float(helper_value))
@@ -812,10 +942,28 @@ def _forecast_days_selection(config: dict[str, Any], hass: HomeAssistant | None 
     return max(MIN_TRIP_DURATION_DAYS, min(configured, MAX_FORECAST_DAYS))
 
 
-def _window_preferences(hass: HomeAssistant | None = None) -> WindowPreferences:
+def _window_preferences(
+    hass: HomeAssistant | None = None,
+    native_controls: dict[str, str] | None = None,
+) -> WindowPreferences:
     return WindowPreferences(
-        weekend_only=_helper_bool(hass, WEEKEND_ONLY_ENTITY, False),
-        preferred_start_weekday=_normalize_weekday(_helper_state(hass, PREFERRED_START_DAY_ENTITY)),
+        weekend_only=_helper_bool(
+            hass,
+            WEEKEND_ONLY_ENTITY,
+            False,
+            native_controls,
+            CONTROL_WEEKEND_ONLY,
+            NATIVE_WEEKEND_ONLY_ENTITY,
+        ),
+        preferred_start_weekday=_normalize_weekday(
+            _state_with_precedence(
+                hass,
+                CONTROL_PREFERRED_START_DAY,
+                NATIVE_PREFERRED_START_DAY_ENTITY,
+                PREFERRED_START_DAY_ENTITY,
+                native_controls,
+            )
+        ),
     )
 
 
@@ -882,14 +1030,22 @@ def _trip_duration_from_config(config: dict[str, Any], forecast_days: int) -> in
     return max(MIN_TRIP_DURATION_DAYS, min(duration, max_supported))
 
 
-def _helper_number_duration(hass: HomeAssistant | None, forecast_days: int) -> int | None:
-    if hass is None:
-        return None
-    state = hass.states.get(TRIP_DURATION_NUMBER_ENTITY)
-    if state is None or state.state in {"unknown", "unavailable", ""}:
+def _helper_number_duration(
+    hass: HomeAssistant | None,
+    forecast_days: int,
+    native_controls: dict[str, str] | None = None,
+) -> int | None:
+    value = _state_with_precedence(
+        hass,
+        CONTROL_TRIP_DURATION_DAYS,
+        NATIVE_TRIP_DURATION_NUMBER_ENTITY,
+        TRIP_DURATION_NUMBER_ENTITY,
+        native_controls,
+    )
+    if value is None:
         return None
     try:
-        duration = round(float(state.state))
+        duration = round(float(value))
     except ValueError:
         return None
     max_supported = max(MIN_TRIP_DURATION_DAYS, min(forecast_days, MAX_FORECAST_DAYS))
@@ -905,25 +1061,88 @@ def _helper_select_value(hass: HomeAssistant | None) -> str | None:
     return state.state
 
 
-def _active_helper_states(hass: HomeAssistant | None) -> dict[str, str | None]:
-    helper_ids = (
-        TRIP_DURATION_NUMBER_ENTITY,
-        TRIP_DURATION_SELECT_ENTITY,
-        TRAVEL_STRATEGY_SELECT_ENTITY,
-        TRAILER_AVAILABLE_ENTITY,
-        AVAILABLE_HOURS_ENTITY,
-        MAX_APPROACH_TIME_ENTITY,
-        FORECAST_HORIZON_ENTITY,
-        WEEKEND_ONLY_ENTITY,
-        PREFERRED_START_DAY_ENTITY,
-    )
-    return {entity_id: _helper_state(hass, entity_id) for entity_id in helper_ids}
+def _active_helper_states(
+    hass: HomeAssistant | None,
+    native_controls: dict[str, str] | None = None,
+) -> dict[str, str | None]:
+    controls = {
+        NATIVE_TRIP_DURATION_SELECT_ENTITY: _state_with_precedence(
+            hass,
+            CONTROL_TRIP_DURATION,
+            NATIVE_TRIP_DURATION_SELECT_ENTITY,
+            TRIP_DURATION_SELECT_ENTITY,
+            native_controls,
+        ),
+        NATIVE_TRIP_DURATION_NUMBER_ENTITY: _state_with_precedence(
+            hass,
+            CONTROL_TRIP_DURATION_DAYS,
+            NATIVE_TRIP_DURATION_NUMBER_ENTITY,
+            TRIP_DURATION_NUMBER_ENTITY,
+            native_controls,
+        ),
+        NATIVE_FORECAST_HORIZON_ENTITY: _state_with_precedence(
+            hass,
+            CONTROL_FORECAST_HORIZON_DAYS,
+            NATIVE_FORECAST_HORIZON_ENTITY,
+            FORECAST_HORIZON_ENTITY,
+            native_controls,
+        ),
+        NATIVE_PREFERRED_START_DAY_ENTITY: _state_with_precedence(
+            hass,
+            CONTROL_PREFERRED_START_DAY,
+            NATIVE_PREFERRED_START_DAY_ENTITY,
+            PREFERRED_START_DAY_ENTITY,
+            native_controls,
+        ),
+        NATIVE_WEEKEND_ONLY_ENTITY: _state_with_precedence(
+            hass, CONTROL_WEEKEND_ONLY, NATIVE_WEEKEND_ONLY_ENTITY, WEEKEND_ONLY_ENTITY, native_controls
+        ),
+        NATIVE_TRAVEL_STRATEGY_SELECT_ENTITY: _state_with_precedence(
+            hass,
+            CONTROL_TRAVEL_STRATEGY,
+            NATIVE_TRAVEL_STRATEGY_SELECT_ENTITY,
+            TRAVEL_STRATEGY_SELECT_ENTITY,
+            native_controls,
+        ),
+        NATIVE_TRAILER_AVAILABLE_ENTITY: _state_with_precedence(
+            hass,
+            CONTROL_TRAILER_AVAILABLE,
+            NATIVE_TRAILER_AVAILABLE_ENTITY,
+            TRAILER_AVAILABLE_ENTITY,
+            native_controls,
+        ),
+        NATIVE_AVAILABLE_HOURS_ENTITY: _state_with_precedence(
+            hass,
+            CONTROL_AVAILABLE_HOURS_PER_DAY,
+            NATIVE_AVAILABLE_HOURS_ENTITY,
+            AVAILABLE_HOURS_ENTITY,
+            native_controls,
+        ),
+        NATIVE_MAX_APPROACH_TIME_ENTITY: _state_with_precedence(
+            hass,
+            CONTROL_MAX_APPROACH_TIME_HOURS,
+            NATIVE_MAX_APPROACH_TIME_ENTITY,
+            MAX_APPROACH_TIME_ENTITY,
+            native_controls,
+        ),
+    }
+    return controls
 
 
-def _trip_planning_profile(config: dict[str, Any], hass: HomeAssistant | None = None) -> TripPlanningProfile:
-    strategy = _normalize_travel_strategy(_helper_state(hass, TRAVEL_STRATEGY_SELECT_ENTITY)) or str(
-        config.get("travel_strategy", DEFAULT_TRAVEL_STRATEGY)
-    )
+def _trip_planning_profile(
+    config: dict[str, Any],
+    hass: HomeAssistant | None = None,
+    native_controls: dict[str, str] | None = None,
+) -> TripPlanningProfile:
+    strategy = _normalize_travel_strategy(
+        _state_with_precedence(
+            hass,
+            CONTROL_TRAVEL_STRATEGY,
+            NATIVE_TRAVEL_STRATEGY_SELECT_ENTITY,
+            TRAVEL_STRATEGY_SELECT_ENTITY,
+            native_controls,
+        )
+    ) or str(config.get("travel_strategy", DEFAULT_TRAVEL_STRATEGY))
     if strategy not in TRAVEL_STRATEGY_OPTIONS:
         strategy = TRAVEL_STRATEGY_MOTORCYCLE_DIRECT
     trailer_support_enabled = _as_bool(
@@ -938,6 +1157,9 @@ def _trip_planning_profile(config: dict[str, Any], hass: HomeAssistant | None = 
             DEFAULT_AVAILABLE_HOURS_PER_DAY,
             minimum=1.0,
             maximum=18.0,
+            native_controls=native_controls,
+            control_key=CONTROL_AVAILABLE_HOURS_PER_DAY,
+            native_entity_id=NATIVE_AVAILABLE_HOURS_ENTITY,
         ),
         max_approach_time_hours=_helper_float(
             hass,
@@ -945,9 +1167,20 @@ def _trip_planning_profile(config: dict[str, Any], hass: HomeAssistant | None = 
             DEFAULT_MAX_APPROACH_TIME_HOURS,
             minimum=0.5,
             maximum=12.0,
+            native_controls=native_controls,
+            control_key=CONTROL_MAX_APPROACH_TIME_HOURS,
+            native_entity_id=NATIVE_MAX_APPROACH_TIME_ENTITY,
         ),
         trailer_support_enabled=trailer_support_enabled,
-        trailer_available=trailer_support_enabled and _helper_bool(hass, TRAILER_AVAILABLE_ENTITY, False),
+        trailer_available=trailer_support_enabled
+        and _helper_bool(
+            hass,
+            TRAILER_AVAILABLE_ENTITY,
+            False,
+            native_controls,
+            CONTROL_TRAILER_AVAILABLE,
+            NATIVE_TRAILER_AVAILABLE_ENTITY,
+        ),
     )
 
 
@@ -960,14 +1193,36 @@ def _helper_state(hass: HomeAssistant | None, entity_id: str) -> str | None:
     return state.state
 
 
+def _state_with_precedence(
+    hass: HomeAssistant | None,
+    control_key: str,
+    native_entity_id: str,
+    legacy_entity_id: str,
+    native_controls: dict[str, str] | None = None,
+) -> str | None:
+    if native_controls and control_key in native_controls:
+        return native_controls[control_key]
+    native_value = _helper_state(hass, native_entity_id)
+    if native_value is not None:
+        return native_value
+    return _helper_state(hass, legacy_entity_id)
+
+
 def _helper_float(
     hass: HomeAssistant | None,
     entity_id: str,
     default: float,
     minimum: float,
     maximum: float,
+    native_controls: dict[str, str] | None = None,
+    control_key: str | None = None,
+    native_entity_id: str | None = None,
 ) -> float:
-    value = _helper_state(hass, entity_id)
+    value = (
+        _state_with_precedence(hass, control_key, native_entity_id, entity_id, native_controls)
+        if control_key and native_entity_id
+        else _helper_state(hass, entity_id)
+    )
     if value is None:
         return default
     try:
@@ -977,8 +1232,19 @@ def _helper_float(
     return max(minimum, min(parsed, maximum))
 
 
-def _helper_bool(hass: HomeAssistant | None, entity_id: str, default: bool) -> bool:
-    value = _helper_state(hass, entity_id)
+def _helper_bool(
+    hass: HomeAssistant | None,
+    entity_id: str,
+    default: bool,
+    native_controls: dict[str, str] | None = None,
+    control_key: str | None = None,
+    native_entity_id: str | None = None,
+) -> bool:
+    value = (
+        _state_with_precedence(hass, control_key, native_entity_id, entity_id, native_controls)
+        if control_key and native_entity_id
+        else _helper_state(hass, entity_id)
+    )
     if value is None:
         return default
     return _as_bool(value, default)
@@ -1053,7 +1319,9 @@ def _score_breakdown(experience: Any, window: Any) -> dict[str, int]:
 
 
 def _recommendation_reason(destination: str, experience: Any, window: Any) -> str:
-    if experience.ride_quality_score >= 85:
+    if experience.ride_quality_score < 70:
+        quality = "least compromised option, not a strong recommendation"
+    elif experience.ride_quality_score >= 85:
         quality = "strongest complete trip window"
     elif experience.ride_quality_score >= 70:
         quality = "best balanced available window"
@@ -1069,6 +1337,8 @@ def _recommendation_reason(destination: str, experience: Any, window: Any) -> st
 
 def _tradeoffs(experience: Any, window: Any) -> list[str]:
     tradeoffs: list[str] = []
+    if experience.weather_score == 0:
+        tradeoffs.append("Weather score is 0/100, so this is only shown as a least-bad option.")
     if experience.weather_score < 80:
         tradeoffs.append(f"Weather is only {experience.weather_score}/100 for this window.")
     if window.weather_stability_score < 80:

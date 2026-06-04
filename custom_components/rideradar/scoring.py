@@ -79,6 +79,16 @@ DESTINATION_TRAFFIC_PROFILES = {
     "teutoburgerwoud": {"popularity": 14, "fun": 78, "access": 90, "countries": {"DE": 1.0, "NL": 0.4}},
 }
 
+RIDE_QUALITY_WEIGHTS = {
+    "weather_score": 40,
+    "stability_score": 20,
+    "temperature_score": 10,
+    "distance_score": 10,
+    "holiday_pressure_score": 10,
+    "access_score": 5,
+    "trip_efficiency_score": 5,
+}
+
 
 def calculate_ride_score(
     forecast: DailyForecast,
@@ -281,17 +291,24 @@ def calculate_ride_experience(
     trip_efficiency = calculate_trip_efficiency(route, window, planning_profile)
     road_fun_score = int(profile["fun"])
 
-    ride_quality_score = _clamp_score(
-        (window.trip_score * 0.32)
-        + (window.weather_stability_score * 0.18)
-        + (temperature_score * 0.10)
-        + (distance_score * 0.10)
-        + (holiday_pressure_score * 0.10)
-        + (access_score * 0.05)
-        + (trip_efficiency["trip_efficiency_score"] * 0.15)
-    )
+    score_components = {
+        "weather_score": window.trip_score,
+        "stability_score": window.weather_stability_score,
+        "temperature_score": temperature_score,
+        "distance_score": distance_score,
+        "holiday_pressure_score": holiday_pressure_score,
+        "access_score": access_score,
+        "trip_efficiency_score": int(trip_efficiency["trip_efficiency_score"]),
+    }
+    ride_quality_score = _weighted_score(score_components, RIDE_QUALITY_WEIGHTS)
+    score_caps = _score_caps(score_components)
+    for cap in score_caps:
+        ride_quality_score = min(ride_quality_score, int(cap["cap"]))
     if trip_efficiency["exclusion_reasons"]:
         ride_quality_score = min(ride_quality_score, 45)
+        score_caps.append({"reason": "excluded_by_trip_efficiency", "cap": 45})
+    verdict = ride_verdict(ride_quality_score)
+    recommendation_type = "least_bad_option" if ride_quality_score < 70 else "recommended"
 
     explanation = _experience_explanation(
         ride_quality_score,
@@ -302,6 +319,8 @@ def calculate_ride_experience(
         holiday_names,
         access_notes,
         trip_efficiency["exclusion_reasons"],
+        score_components,
+        recommendation_type,
     )
     return RideExperience(
         ride_quality_score=ride_quality_score,
@@ -322,6 +341,10 @@ def calculate_ride_experience(
         estimated_destination_ride_time_hours=float(trip_efficiency["estimated_destination_ride_time_hours"]),
         approach_enjoyment_factor=float(trip_efficiency["approach_enjoyment_factor"]),
         destination_ride_time_ratio=float(trip_efficiency["destination_ride_time_ratio"]),
+        score_weights=dict(RIDE_QUALITY_WEIGHTS),
+        score_caps=score_caps,
+        verdict=verdict,
+        recommendation_type=recommendation_type,
         road_fun_score=road_fun_score,
         holiday_names=holiday_names,
         access_notes=access_notes,
@@ -330,6 +353,42 @@ def calculate_ride_experience(
         exclusion_reasons=list(trip_efficiency["exclusion_reasons"]),
         explanation=explanation,
     )
+
+
+def ride_verdict(score: int) -> str:
+    """Return release-facing score threshold label."""
+    if score >= 90:
+        return "Excellent"
+    if score >= 80:
+        return "Very good"
+    if score >= 70:
+        return "Good"
+    if score >= 60:
+        return "Mediocre"
+    if score >= 40:
+        return "Poor"
+    return "Not recommended"
+
+
+def _weighted_score(components: dict[str, int], weights: dict[str, int]) -> int:
+    total_weight = sum(weights.values())
+    if total_weight <= 0:
+        return 0
+    weighted = sum(_clamp_score(components.get(name, 0)) * weight for name, weight in weights.items())
+    return _clamp_score(weighted / total_weight)
+
+
+def _score_caps(components: dict[str, int]) -> list[dict[str, int | str]]:
+    caps: list[dict[str, int | str]] = []
+    weather_score = components["weather_score"]
+    stability_score = components["stability_score"]
+    if weather_score == 0:
+        caps.append({"reason": "weather_score_zero", "cap": 50})
+    elif weather_score < 25:
+        caps.append({"reason": "weather_score_below_25", "cap": 60})
+    if weather_score == 0 and stability_score == 0:
+        caps.append({"reason": "weather_and_stability_zero", "cap": 45})
+    return caps
 
 
 def calculate_trip_efficiency(
@@ -559,8 +618,20 @@ def _experience_explanation(
     holiday_names: list[str],
     access_notes: list[str],
     exclusion_reasons: list[str],
+    score_components: dict[str, int],
+    recommendation_type: str,
 ) -> str:
     parts = [f"Ride quality is {ride_quality_score}/100."]
+    if recommendation_type == "least_bad_option":
+        parts.append("No strong ride was found; this is the least compromised option within the current settings.")
+    if score_components["weather_score"] == 0:
+        parts.append(
+            "This ride scores low because the weather score is 0/100; rain, cold, wind or unstable weather is expected."
+        )
+    elif score_components["weather_score"] < 25:
+        parts.append("Weather is poor enough to cap the final recommendation score.")
+    if score_components["stability_score"] == 0:
+        parts.append("Forecast stability is 0/100, so the complete window is unreliable.")
     if exclusion_reasons:
         parts.append("This option is excluded because " + "; ".join(exclusion_reasons) + ".")
     if traffic_score >= 80:

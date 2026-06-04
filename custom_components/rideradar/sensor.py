@@ -123,7 +123,8 @@ async def async_setup_entry(
             entry,
             coordinator,
             SensorEntityDescription(key="best_summary", name="Best Summary", icon="mdi:text-box-check"),
-            lambda data: data.get("summary"),
+            lambda data: data.get("summary")
+            or "Nog geen samenvatting beschikbaar. Controleer of RideRadar al forecast-data heeft opgehaald.",
             lambda data: {
                 "active_helpers": data.get("active_helpers", {}),
                 "excluded_destinations": data.get("excluded_destinations", []),
@@ -149,8 +150,14 @@ async def async_setup_entry(
                 name="Top Week Opportunities",
                 icon="mdi:calendar-week",
             ),
-            lambda data: _top_opportunity_summary(data.get("top_week_opportunities")),
-            lambda data: {"opportunities": data.get("top_week_opportunities", [])},
+            lambda data: _top_opportunity_summary(data.get("top_week_opportunities"))
+            or "Geen kansen boven 70 gevonden",
+            lambda data: {
+                "opportunities": data.get("top_week_opportunities", []),
+                "candidate_count": data.get("top_week_candidate_count", 0),
+                "rejected_count": data.get("top_week_rejected_count", 0),
+                "best_below_threshold": data.get("top_week_best_below_threshold"),
+            },
         ),
         RideRadarSensor(
             entry,
@@ -160,8 +167,14 @@ async def async_setup_entry(
                 name="Top Month Opportunities",
                 icon="mdi:calendar-month",
             ),
-            lambda data: _top_opportunity_summary(data.get("top_month_opportunities")),
-            lambda data: {"opportunities": data.get("top_month_opportunities", [])},
+            lambda data: _top_opportunity_summary(data.get("top_month_opportunities"))
+            or "Geen kansen boven 70 gevonden",
+            lambda data: {
+                "opportunities": data.get("top_month_opportunities", []),
+                "candidate_count": data.get("top_month_candidate_count", 0),
+                "rejected_count": data.get("top_month_rejected_count", 0),
+                "best_below_threshold": data.get("top_month_best_below_threshold"),
+            },
         ),
         RideRadarSensor(
             entry,
@@ -515,6 +528,9 @@ def _window_attributes(result: DestinationResult, window: Any, planning_profile:
         "distance_score": experience.distance_score if experience else None,
         "temperature_score": experience.temperature_score if experience else None,
         "trip_efficiency_score": experience.trip_efficiency_score if experience else None,
+        "score_weights": experience.score_weights if experience else None,
+        "score_caps": experience.score_caps if experience else [],
+        "recommendation_type": experience.recommendation_type if experience else None,
         "travel_strategy": experience.travel_strategy if experience else None,
         "approach_time_hours": experience.approach_time_hours if experience else None,
         "return_time_hours": experience.return_time_hours if experience else None,
@@ -558,6 +574,10 @@ def _experience_attributes(result: DestinationResult) -> dict[str, Any] | None:
         "temperature_score": experience.temperature_score,
         "distance_score": experience.distance_score,
         "trip_efficiency_score": experience.trip_efficiency_score,
+        "score_weights": experience.score_weights,
+        "score_caps": experience.score_caps,
+        "verdict": experience.verdict,
+        "recommendation_type": experience.recommendation_type,
         "travel_strategy": experience.travel_strategy,
         "approach_time_hours": experience.approach_time_hours,
         "return_time_hours": experience.return_time_hours,
@@ -613,6 +633,8 @@ def _best_future_window(result: DestinationResult, planning_profile: Any = None)
         "holiday_pressure_score": best["holiday_pressure_score"],
         "access_score": best["access_score"],
         "score_breakdown": best["score_breakdown"],
+        "score_weights": best.get("score_weights"),
+        "score_caps": best.get("score_caps"),
         "recommendation_reason": best["recommendation_reason"],
         "tradeoffs": best["tradeoffs"],
         "exclusion_reasons": best["exclusion_reasons"],
@@ -772,13 +794,17 @@ def _is_weekend(start_value: str, end_value: str) -> bool:
 
 def _verdict(score: int, weekend: bool) -> str:
     suffix = " weekend" if weekend else " window"
-    if score >= 85:
+    if score >= 90:
         return f"Excellent{suffix}"
+    if score >= 80:
+        return f"Very good{suffix}"
     if score >= 70:
         return f"Good{suffix}"
-    if score >= 55:
-        return f"Marginal{suffix}"
-    return f"Poor{suffix}"
+    if score >= 60:
+        return f"Mediocre{suffix}"
+    if score >= 40:
+        return f"Poor{suffix}"
+    return f"Not recommended{suffix}"
 
 
 def _days_until(start_day: str) -> int | None:

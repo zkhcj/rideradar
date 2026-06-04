@@ -39,6 +39,22 @@ RideRadar exposes a rider-facing `ride_quality_score` built from:
 | Trip efficiency score | How much useful riding time remains after approach and return travel |
 | Road fun score | Destination suitability for enjoyable motorcycle roads |
 
+Default `ride_quality_score` weights:
+
+| Component | Weight |
+| --- | ---: |
+| `weather_score` | 40% |
+| `stability_score` | 20% |
+| `temperature_score` | 10% |
+| `distance_score` | 10% |
+| `holiday_pressure_score` | 10% |
+| `access_score` | 5% |
+| `trip_efficiency_score` | 5% |
+
+Bad weather is gated. If `weather_score` is below 25, RideRadar caps the final score at 60. If `weather_score` is 0, the final score is capped at 50. If both weather and stability are 0, the final score is capped at 45. Below 70, the hero treats the result as the least compromised option instead of a strong recommendation.
+
+Top week and top forecast cards only show opportunities with `ride_quality_score >= 70`. If none are available, the dashboard shows the best rejected candidate and the main rejection reason.
+
 Current holiday, access, traffic pressure, tourism pressure, and road-fun scoring is deterministic and offline-friendly. It uses destination profiles, public-holiday calculations, long-weekend detection, seasonality, and known regional motorcycle restriction risk. Future routing providers can replace these heuristics with live traffic and road closure data.
 
 ## 10-Step Quickstart
@@ -55,6 +71,180 @@ Current holiday, access, traffic pressure, tourism pressure, and road-fun scorin
 10. Check RideRadar before planning the ride.
 
 ## Ready-To-Copy Dashboard Examples
+
+## Default Dashboard
+
+RideRadar automatically creates its own dashboard control entities. You do not need to create `input_select`, `input_number`, or `input_boolean` helpers manually.
+
+Paste this as a complete Lovelace view:
+
+```yaml
+title: RideRadar
+path: rideradar
+icon: mdi:map-marker-star
+cards:
+  - type: markdown
+    title: RideRadar advies
+    content: >
+      {% set best = states('sensor.rideradar_best_trip_destination') %}
+      {% set score = states('sensor.rideradar_best_ride_quality_score') %}
+      {% set summary = states('sensor.rideradar_best_summary') %}
+      {% set opportunity = state_attr('sensor.rideradar_best_next_available_opportunity', 'opportunity') or {} %}
+      {% set trace = state_attr('sensor.rideradar_best_summary', 'best_decision_trace') or {} %}
+      {% set result = trace.result or {} %}
+      ## {{ best if best not in ['unknown', 'unavailable', none, ''] else 'Nog niet beschikbaar' }}
+
+      Score: **{{ score if score not in ['unknown', 'unavailable', none, ''] else 'Nog niet beschikbaar' }}/100**
+
+      Periode: **{{ opportunity.period | default('Nog niet beschikbaar') }}**
+
+      Duur: **{{ opportunity.duration_days | default(state_attr('sensor.rideradar_trip_duration', 'duration_label') | default('Nog niet beschikbaar')) }}**
+
+      Status: **{{ result.recommendation_type | default('onbekend') }}**
+
+      {{ summary if summary not in ['unknown', 'unavailable', none, ''] else 'Nog geen samenvatting beschikbaar. Controleer of RideRadar al forecast-data heeft opgehaald.' }}
+
+      {{ opportunity.recommendation_reason | default('Nog geen aanbevelingsreden beschikbaar.') }}
+
+  - type: entities
+    title: RideRadar instellingen
+    entities:
+      - entity: select.rideradar_trip_duration
+        name: Ritduur
+      - entity: number.rideradar_trip_duration_days
+        name: Aantal dagen
+      - entity: number.rideradar_forecast_horizon_days
+        name: Forecast horizon
+      - entity: select.rideradar_preferred_start_day
+        name: Gewenste startdag
+      - entity: switch.rideradar_weekend_only
+        name: Alleen weekend
+      - entity: select.rideradar_travel_strategy
+        name: Reisstrategie
+      - entity: switch.rideradar_trailer_available
+        name: Trailer beschikbaar
+      - entity: number.rideradar_available_hours_per_day
+        name: Beschikbare uren per dag
+      - entity: number.rideradar_max_approach_time_hours
+        name: Max aanrijtijd
+
+  - type: markdown
+    title: Top 3 deze week
+    content: >
+      {% set windows = state_attr('sensor.rideradar_top_week_opportunities', 'opportunities') or [] %}
+      {% set rejected = state_attr('sensor.rideradar_top_week_opportunities', 'best_below_threshold') %}
+      {% if windows %}
+      {% for item in windows %}
+      {{ loop.index }}. **{{ item.destination }}** - {{ item.ride_quality_score }}/100
+      {{ item.period }}
+
+      {% endfor %}
+      {% else %}
+      Geen kansen boven 70 gevonden.
+      {% if rejected %}
+      Beste deze week: **{{ rejected.destination }} {{ rejected.ride_quality_score }}/100**.
+      Belangrijkste reden: **{{ rejected.reason }}**.
+      {% else %}
+      Er zijn nog geen kandidaten binnen de huidige instellingen.
+      {% endif %}
+      {% endif %}
+
+  - type: markdown
+    title: Beste kansen in forecast
+    content: >
+      {% set windows = state_attr('sensor.rideradar_top_month_opportunities', 'opportunities') or [] %}
+      {% set rejected = state_attr('sensor.rideradar_top_month_opportunities', 'best_below_threshold') %}
+      {% if windows %}
+      {% for item in windows %}
+      {{ loop.index }}. **{{ item.destination }}** - {{ item.ride_quality_score }}/100
+      {{ item.period }}
+
+      {% endfor %}
+      {% else %}
+      Geen kansen boven 70 gevonden in de forecast horizon.
+      {% if rejected %}
+      Beste afgewezen optie: **{{ rejected.destination }} {{ rejected.ride_quality_score }}/100**.
+      Belangrijkste reden: **{{ rejected.reason }}**.
+      {% endif %}
+      {% endif %}
+
+  - type: markdown
+    title: Weekendrit
+    content: >
+      {% set item = state_attr('sensor.rideradar_best_weekend_opportunity', 'opportunity') %}
+      {% if item %}
+      **{{ item.destination }}** - {{ item.ride_quality_score }}/100
+      {{ item.period }}
+
+      {{ item.recommendation_reason }}
+      {% else %}
+      Geen aparte weekendkans beschikbaar binnen de huidige instellingen.
+      {% endif %}
+
+  - type: markdown
+    title: Ranking
+    content: >
+      {% set windows = state_attr('sensor.rideradar_best_opportunities', 'opportunities') or [] %}
+      | Bestemming | Score | Weer | Efficiëntie | Periode |
+      | --- | ---: | ---: | ---: | --- |
+      {% for item in windows[:8] %}
+      | {{ item.destination }} | {{ item.ride_quality_score }}/100 | {{ item.weather_score }}/100 | {{ item.trip_efficiency_score }}/100 | {{ item.period }} |
+      {% endfor %}
+
+  - type: markdown
+    title: Score-opbouw
+    content: >
+      {% set trace = state_attr('sensor.rideradar_best_summary', 'best_decision_trace') or {} %}
+      {% set scores = trace.scores or {} %}
+      {% set caps = trace.caps or [] %}
+      - Weer: {{ scores.weather_score | default('n.b.') }}/100
+      - Stabiliteit: {{ scores.stability_score | default('n.b.') }}/100
+      - Temperatuur: {{ scores.temperature_score | default('n.b.') }}/100
+      - Afstand: {{ scores.distance_score | default('n.b.') }}/100
+      - Vakantiedruk: {{ scores.holiday_pressure_score | default('n.b.') }}/100
+      - Toegang: {{ scores.access_score | default('n.b.') }}/100
+      - Trip efficiency: {{ scores.trip_efficiency_score | default('n.b.') }}/100
+      - Eindscore: {{ scores.ride_quality_score | default('n.b.') }}/100
+
+      {% if caps %}
+      Caps:
+      {% for cap in caps %}
+      - {{ cap.reason }}: maximaal {{ cap.cap }}
+      {% endfor %}
+      {% endif %}
+
+  - type: markdown
+    title: Uitgesloten bestemmingen
+    content: >
+      {% set excluded = state_attr('sensor.rideradar_best_summary', 'excluded_destinations') or [] %}
+      {% if excluded %}
+      {% for item in excluded[:8] %}
+      - **{{ item.destination }}**: {{ item.reason }} - {{ item.details }}
+      {% endfor %}
+      {% else %}
+      Geen uitgesloten bestemmingen.
+      {% endif %}
+
+  - type: markdown
+    title: Debug trace
+    content: >
+      {% set trace = state_attr('sensor.rideradar_best_summary', 'best_decision_trace') or {} %}
+      {% set inputs = trace.inputs or {} %}
+      {% set result = trace.result or {} %}
+      Reisstrategie: **{{ inputs.travel_strategy | default('onbekend') }}**
+
+      Trailer beschikbaar: **{{ inputs.trailer_available | default('onbekend') }}**
+
+      Weekend only: **{{ inputs.weekend_only | default('onbekend') }}**
+
+      Voorkeursdag: **{{ inputs.preferred_start_day | default('any') }}**
+
+      Verdict: **{{ result.verdict | default('onbekend') }}**
+```
+
+If the native control entities are missing, reload the RideRadar integration from Settings > Devices & services. A full Home Assistant restart should not be required during normal configuration changes.
+
+Screenshot placeholder: add your dashboard screenshot at `docs/images/rideradar-dashboard-hero.png` after importing the view above.
 
 ### Best Trip
 
@@ -74,38 +264,39 @@ content: >
   {{ states('sensor.rideradar_best_summary') }}
 ```
 
-### Dashboard Duration Controls
+### Native Dashboard Controls
 
-Create any helpers you want to control from the dashboard, then place them above the RideRadar cards.
+RideRadar creates these controls automatically. Place them above the RideRadar cards if you want a compact control panel.
 
 ```yaml
 type: entities
 title: RideRadar controls
 entities:
-  - entity: input_select.rideradar_trip_duration
+  - entity: select.rideradar_trip_duration
     name: Trip duration
-  - entity: input_number.rideradar_trip_duration_days
+  - entity: number.rideradar_trip_duration_days
     name: Custom or flexible maximum days
-  - entity: input_number.rideradar_forecast_horizon_days
+  - entity: number.rideradar_forecast_horizon_days
     name: Forecast horizon
-  - entity: input_select.rideradar_preferred_start_day
+  - entity: select.rideradar_preferred_start_day
     name: Preferred start day
-  - entity: input_boolean.rideradar_weekend_only
+  - entity: switch.rideradar_weekend_only
     name: Weekend only
-  - entity: input_select.rideradar_travel_strategy
+  - entity: select.rideradar_travel_strategy
     name: Travel strategy
-  - entity: input_boolean.rideradar_trailer_available
+  - entity: switch.rideradar_trailer_available
     name: Trailer available
-  - entity: input_number.rideradar_available_hours_per_day
+  - entity: number.rideradar_available_hours_per_day
     name: Available hours per day
-  - entity: input_number.rideradar_max_approach_time_hours
+  - entity: number.rideradar_max_approach_time_hours
     name: Max approach time
 ```
 
-Supported `input_select.rideradar_trip_duration` values include `1 day`, `2 days`, `3 days`, `flexible`, and `custom`.
-`input_number.rideradar_trip_duration_days` is read dynamically on every RideRadar refresh.
-Supported `input_select.rideradar_travel_strategy` values include `Motorcycle Direct`, `Motorcycle Scenic Approach`, and `Trailer Transport`.
-Trailer recommendations only appear when trailer support is enabled in configuration and `input_boolean.rideradar_trailer_available` is on.
+Supported `select.rideradar_trip_duration` values include `1 day`, `2 days`, `3 days`, `flexible`, and `custom`.
+Supported `select.rideradar_travel_strategy` values include `Motorcycle Direct`, `Motorcycle Scenic Approach`, and `Trailer Transport`.
+Trailer recommendations only appear when trailer support is enabled in configuration and `switch.rideradar_trailer_available` is on.
+
+Legacy `input_*` helpers are still read as fallback for older dashboards, but new dashboards should use the native RideRadar entities above.
 
 ### This Week: Top 3
 
