@@ -37,7 +37,7 @@ class FakeRoutingClient:
         return RouteInfo(80, 45, "fake")
 
 
-def _entry(trailer_support_enabled=False):
+def _entry(trailer_support_enabled=False, destinations=None):
     return MockConfigEntry(
         domain=DOMAIN,
         data={
@@ -50,7 +50,7 @@ def _entry(trailer_support_enabled=False):
             CONF_CUSTOM_TRIP_DURATION_DAYS: 4,
             CONF_ACTIVITY_PROFILE: DEFAULT_ACTIVITY_PROFILE,
             CONF_DETOUR_FACTOR: DEFAULT_DETOUR_FACTOR,
-            "custom_destinations": [DestinationArea("Sauerland", "Germany", 51.0, 8.0).as_dict()],
+            "custom_destinations": destinations or [DestinationArea("Sauerland", "Germany", 51.0, 8.0).as_dict()],
             "enabled_default_destinations": [],
             CONF_TRAILER_SUPPORT_ENABLED: trailer_support_enabled,
         },
@@ -221,3 +221,58 @@ async def test_strategy_trailer_sensors_only_created_when_enabled(hass) -> None:
     await async_setup_sensor(hass, enabled_entry, enabled_entities.extend)
 
     assert any(entity.unique_id.endswith("_top_week_trailer_opportunities") for entity in enabled_entities)
+
+
+async def test_evaluation_summary_matches_candidate_rows(hass) -> None:
+    coordinator = RideRadarDataCoordinator(hass, _entry(), FakeApiClient(), FakeRoutingClient())
+    coordinator.set_runtime_control("trip_duration_days", "4")
+
+    data = await coordinator._async_update_data()
+    rows = data["evaluated_candidates"]
+    summary = data["evaluation_summary"]
+
+    assert rows
+    assert summary["total_candidates"] == len(rows)
+    assert summary["rejected"] == len([row for row in rows if row["result"] == "rejected"])
+    assert summary["unavailable"] == len([row for row in rows if row["result"] == "unavailable"])
+    assert summary["recommended"] == 1
+    assert all(row["result"] in {"recommended", "eligible", "compromise", "rejected", "unavailable"} for row in rows)
+
+
+async def test_rejected_and_unavailable_candidates_have_reason_and_evidence(hass) -> None:
+    class FailingApiClient:
+        async def get_daily_forecast(self, latitude, longitude, forecast_days):
+            raise ValueError("provider down")
+
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        _entry(),
+        FailingApiClient(),
+        FakeRoutingClient(),
+    )
+
+    data = await coordinator._async_update_data()
+    rows = data["evaluated_candidates"]
+    blocked = [row for row in rows if row["result"] in {"rejected", "unavailable"}]
+
+    assert blocked
+    assert all(row["primary_reason"] for row in blocked)
+    assert all(row["evidence"] for row in blocked)
+    assert all(row["supporting_evidence"] for row in blocked)
+
+
+async def test_eligible_candidates_are_not_rejected_when_ranked_below_best(hass) -> None:
+    destinations = [
+        DestinationArea("Sauerland", "Germany", 51.0, 8.0).as_dict(),
+        DestinationArea("Eifel", "Germany", 50.4, 6.8).as_dict(),
+    ]
+    entry = _entry(destinations=destinations)
+    coordinator = RideRadarDataCoordinator(hass, entry, FakeApiClient(), FakeRoutingClient())
+    coordinator.set_runtime_control("trip_duration_days", "4")
+
+    data = await coordinator._async_update_data()
+    rows = data["evaluated_candidates"]
+
+    assert any(row["result"] == "recommended" for row in rows)
+    assert any(row["result"] == "eligible" for row in rows)
+    assert not any(row["result"] == "rejected" and (row["total_score"] or 0) >= 70 for row in rows)

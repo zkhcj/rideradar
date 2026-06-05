@@ -248,6 +248,9 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             "forecast_status": "temporarily_unavailable",
             "forecast_status_message": message,
             "excluded_destinations": disabled_destinations,
+            "evaluated_candidates": [],
+            "evaluation_summary": _evaluation_summary([]),
+            "advice_candidate": None,
             "duration_mode": trip_duration.mode,
             "trip_duration": trip_duration.max_days,
             "trip_duration_label": trip_duration.label,
@@ -314,6 +317,9 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 "destination_count": 0,
                 "summary": "No enabled destinations configured",
                 "excluded_destinations": disabled_destinations,
+                "evaluated_candidates": [],
+                "evaluation_summary": _evaluation_summary([]),
+                "advice_candidate": None,
                 "duration_mode": trip_duration.mode,
                 "trip_duration": trip_duration.max_days,
                 "trip_duration_label": trip_duration.label,
@@ -391,6 +397,9 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         top_week_stats = _top_opportunity_stats(opportunities, max_days_until=COMING_WEEK_DAYS)
         top_month_stats = _top_opportunity_stats(opportunities)
         excluded_destinations = _excluded_destinations(results) + disabled_destinations
+        evaluated_candidates = _evaluated_candidates(opportunities, all_opportunities, excluded_destinations)
+        evaluation_summary = _evaluation_summary(evaluated_candidates)
+        advice_candidate = _advice_candidate(evaluated_candidates)
         if LOGGER.isEnabledFor(logging.DEBUG):
             LOGGER.debug(
                 "RideRadar calculated %s candidate windows across %s destinations. "
@@ -420,6 +429,9 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             "top_month_rejected_count": top_month_stats["rejected_count"],
             "top_month_best_below_threshold": top_month_stats["best_below_threshold"],
             "excluded_destinations": excluded_destinations,
+            "evaluated_candidates": evaluated_candidates,
+            "evaluation_summary": evaluation_summary,
+            "advice_candidate": advice_candidate,
             "best_weekend_opportunity": _best_matching_opportunity(opportunities, "weekend"),
             "best_weekday_opportunity": _best_matching_opportunity(opportunities, "weekday"),
             "best_next_available_opportunity": opportunities[0] if opportunities else None,
@@ -1046,6 +1058,217 @@ def _top_opportunity_stats(
         "rejected_count": len(rejected),
         "best_below_threshold": _rejection_summary(best_rejected) if best_rejected else None,
     }
+
+
+def _evaluated_candidates(
+    selected_opportunities: list[dict[str, Any]],
+    all_opportunities: list[dict[str, Any]],
+    excluded_destinations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    recommended_key = _candidate_key(selected_opportunities[0]) if selected_opportunities else None
+    rows: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    for opportunity in all_opportunities:
+        key = _candidate_key(opportunity)
+        if key in seen:
+            continue
+        seen.add(key)
+        score = int(opportunity["ride_quality_score"])
+        result = "recommended" if key == recommended_key else "eligible" if score >= 70 else "compromise"
+        rows.append(_candidate_from_opportunity(opportunity, result))
+    for item in excluded_destinations:
+        rows.append(_candidate_from_exclusion(item))
+    return rows
+
+
+def _candidate_key(opportunity: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        opportunity.get("destination"),
+        opportunity.get("strategy"),
+        opportunity.get("start_date"),
+        opportunity.get("end_date"),
+        opportunity.get("duration_days"),
+    )
+
+
+def _candidate_from_opportunity(opportunity: dict[str, Any], result: str) -> dict[str, Any]:
+    reason_code = None if result in {"recommended", "eligible"} else "below_minimum_score"
+    primary_reason = _candidate_result_label(result) if reason_code is None else "Score onder adviesdrempel"
+    evidence = _opportunity_evidence(opportunity, result)
+    score_breakdown = opportunity.get("score_breakdown", {})
+    return {
+        "status": result,
+        "result": result,
+        "destination": opportunity.get("destination"),
+        "mode": opportunity.get("strategy"),
+        "mode_label": opportunity.get("strategy_label"),
+        "period": opportunity.get("period"),
+        "period_start": opportunity.get("start_date"),
+        "period_end": opportunity.get("end_date"),
+        "duration_days": opportunity.get("duration_days"),
+        "total_score": opportunity.get("ride_quality_score"),
+        "weather_score": opportunity.get("weather_score"),
+        "eligibility_result": _candidate_result_label(result),
+        "primary_reason_code": reason_code,
+        "primary_reason": primary_reason,
+        "evidence": evidence,
+        "supporting_evidence": "; ".join(evidence),
+        "secondary_reasons": opportunity.get("tradeoffs", []),
+        "weather_provider": opportunity.get("weather_provider_used"),
+        "forecast_location": opportunity.get("forecast_location_name"),
+        "weather_status": opportunity.get("weather_status"),
+        "cache_age_hours": opportunity.get("forecast_cache_age_hours"),
+        "cache_age_minutes": _hours_to_minutes(opportunity.get("forecast_cache_age_hours")),
+        "missing_data": [],
+        "score_breakdown": {
+            "weather": score_breakdown.get("weather_score"),
+            "distance": score_breakdown.get("distance_score"),
+            "availability": 100,
+            "stability": score_breakdown.get("stability_score"),
+            "temperature": score_breakdown.get("temperature_score"),
+            "trip_efficiency": score_breakdown.get("trip_efficiency_score"),
+            "final": score_breakdown.get("ride_quality_score"),
+        },
+        "hard_rule_results": {
+            "weather_data": opportunity.get("weather_status") in {"ok", "partial", "stale"},
+            "score_threshold": (opportunity.get("ride_quality_score") or 0) >= 70,
+        },
+    }
+
+
+def _candidate_from_exclusion(item: dict[str, Any]) -> dict[str, Any]:
+    reason_code = str(item.get("reason") or "unknown")
+    status = "unavailable" if reason_code == "no_forecast_data" else "rejected"
+    destination = item.get("destination")
+    details = str(item.get("details") or "Geen detail beschikbaar.")
+    return {
+        "status": status,
+        "result": status,
+        "destination": destination,
+        "mode": None,
+        "mode_label": "n.v.t.",
+        "period": "Niet beoordeeld",
+        "period_start": None,
+        "period_end": None,
+        "duration_days": None,
+        "total_score": None,
+        "weather_score": None,
+        "eligibility_result": _candidate_result_label(status),
+        "primary_reason_code": reason_code,
+        "primary_reason": _reason_label(reason_code),
+        "evidence": [details],
+        "supporting_evidence": details,
+        "secondary_reasons": [],
+        "weather_provider": item.get("weather_provider_used"),
+        "forecast_location": item.get("forecast_location_name") or destination,
+        "weather_status": item.get("weather_status"),
+        "cache_age_hours": item.get("forecast_cache_age_hours"),
+        "cache_age_minutes": _hours_to_minutes(item.get("forecast_cache_age_hours")),
+        "missing_data": ["weather"] if reason_code == "no_forecast_data" else [],
+        "score_breakdown": {
+            "weather": None,
+            "distance": None,
+            "availability": None,
+            "stability": None,
+            "temperature": None,
+            "trip_efficiency": None,
+            "final": None,
+        },
+        "hard_rule_results": {
+            "weather_data": reason_code != "no_forecast_data",
+            "distance": reason_code != "too_far",
+        },
+    }
+
+
+def _opportunity_evidence(opportunity: dict[str, Any], result: str) -> list[str]:
+    score = opportunity.get("ride_quality_score")
+    weather = opportunity.get("weather_score")
+    duration = opportunity.get("duration_days")
+    evidence = [
+        f"Totaalscore {score}/100; adviesdrempel 70.",
+        f"Weerscore {weather}/100.",
+        f"Duur {duration} dagen.",
+    ]
+    if result == "recommended":
+        evidence.insert(0, "Hoogst gerangschikte kandidaat binnen de actieve instellingen.")
+    elif result == "eligible":
+        evidence.insert(0, "Voldoet aan harde eisen, maar een andere kandidaat staat hoger.")
+    else:
+        evidence.insert(0, "Bruikbaar compromis, maar onder de adviesdrempel.")
+    return evidence
+
+
+def _evaluation_summary(candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    counts = {
+        "recommended": 0,
+        "eligible": 0,
+        "compromise": 0,
+        "rejected": 0,
+        "unavailable": 0,
+    }
+    reason_counts: dict[str, int] = {}
+    for candidate in candidates:
+        result = str(candidate.get("result") or "unavailable")
+        if result == "compromises":
+            result = "compromise"
+        if result in counts:
+            counts[result] += 1
+        reason = candidate.get("primary_reason_code")
+        if result in {"rejected", "unavailable", "compromise"} and reason:
+            reason_counts[str(reason)] = reason_counts.get(str(reason), 0) + 1
+    return {
+        "total_candidates": len(candidates),
+        "recommended": counts["recommended"],
+        "eligible": counts["eligible"],
+        "compromises": counts["compromise"],
+        "rejected": counts["rejected"],
+        "unavailable": counts["unavailable"],
+        "suitable": counts["recommended"] + counts["eligible"],
+        "rejection_reason_counts": reason_counts,
+        "rejection_reason_labels": {reason: _reason_label(reason) for reason in reason_counts},
+    }
+
+
+def _advice_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for status in ("recommended", "eligible", "compromise", "unavailable"):
+        for candidate in candidates:
+            if candidate.get("result") == status:
+                return candidate
+    return None
+
+
+def _candidate_result_label(result: str) -> str:
+    return {
+        "recommended": "Aanbevolen",
+        "eligible": "Geschikt alternatief",
+        "compromise": "Compromis",
+        "rejected": "Afgewezen",
+        "unavailable": "Niet beoordeelbaar",
+    }.get(result, result)
+
+
+def _reason_label(reason: str) -> str:
+    return {
+        "below_minimum_score": "Score onder adviesdrempel",
+        "too_far": "Buiten ingestelde afstand",
+        "no_forecast_data": "Geen bruikbare weerdata beschikbaar",
+        "no_complete_window": "Geen volledig ritvenster",
+        "weekend_only_filter": "Past niet binnen weekendfilter",
+        "preferred_start_day_filter": "Past niet bij voorkeursdag",
+        "trailer_required_but_unavailable": "Aanhanger nodig, maar niet beschikbaar",
+        "trailer_disabled": "Aanhangertransport staat uit",
+        "approach_time_too_high": "Aanrijtijd te hoog",
+        "insufficient_destination_ride_time": "Te weinig bruikbare rijtijd",
+        "disabled": "Bestemming uitgeschakeld",
+    }.get(reason, reason)
+
+
+def _hours_to_minutes(value: Any) -> int | None:
+    try:
+        return round(float(value) * 60)
+    except (TypeError, ValueError):
+        return None
 
 
 def _rejection_summary(opportunity: dict[str, Any] | None) -> dict[str, Any] | None:

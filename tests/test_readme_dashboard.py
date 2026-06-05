@@ -35,6 +35,7 @@ def test_default_dashboard_uses_native_entities_and_literal_markdown_tables() ->
         "sensor.rideradar_top_forecast_scenic_opportunities",
         "sensor.rideradar_top_forecast_trailer_opportunities",
         "sensor.rideradar_weather_status",
+        "sensor.rideradar_evaluation_summary",
         "select.rideradar_trip_duration",
         "number.rideradar_trip_duration_days",
         "number.rideradar_forecast_horizon_days",
@@ -48,15 +49,20 @@ def test_default_dashboard_uses_native_entities_and_literal_markdown_tables() ->
     ):
         assert entity_id in readme
 
-    assert "Deze week - direct" in readme
-    assert "Deze week - binnendoor" in readme
-    assert "Deze maand - direct" in readme
-    assert "Deze maand - binnendoor" in readme
-    assert "Beschikbare vensters" in readme
+    assert "'Deze week', 'direct'" in readme
+    assert "'Deze week', 'binnendoor'" in readme
+    assert "'Deze maand', 'direct'" in readme
+    assert "'Deze maand', 'binnendoor'" in readme
+    assert "Afwijzingssamenvatting" in readme
+    assert "Evaluatietabel" in readme
     assert "Coming 8 dagen" not in readme
     assert "Forecast - direct" not in readme
     assert "Forecast - binnendoor" not in readme
-    assert "| Bestemming | Strategie | Score | Dagen | Periode | Aandachtspunt |" in readme
+    assert "Calls vandaag:" not in readme
+    assert (
+        "| Status | Bestemming | Modus | Periode | Dagen | Score | Weer | Reden | Bewijs | Provider | "
+        "Forecastlocatie | Cache | Ontbrekend |"
+    ) in readme
     assert "Aanhanger vandaag beschikbaar" in readme
     assert "type: custom:flex-table-card" in readme
     assert "opportunities.score" in readme

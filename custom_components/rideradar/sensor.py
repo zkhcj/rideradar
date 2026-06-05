@@ -129,8 +129,22 @@ async def async_setup_entry(
             lambda data: {
                 "active_helpers": data.get("active_helpers", {}),
                 "excluded_destinations": data.get("excluded_destinations", []),
+                "evaluation_summary": data.get("evaluation_summary", {}),
+                "evaluated_candidates": data.get("evaluated_candidates", []),
+                "advice_candidate": data.get("advice_candidate"),
                 "top_exclusion_reason": _top_exclusion_reason(data.get("excluded_destinations")),
                 "best_decision_trace": _best_decision_trace(data),
+            },
+        ),
+        RideRadarSensor(
+            entry,
+            coordinator,
+            SensorEntityDescription(key="evaluation_summary", name="Evaluation Summary", icon="mdi:clipboard-list"),
+            lambda data: (data.get("evaluation_summary") or {}).get("total_candidates", 0),
+            lambda data: {
+                "evaluation_summary": data.get("evaluation_summary", {}),
+                "evaluated_candidates": data.get("evaluated_candidates", []),
+                "advice_candidate": data.get("advice_candidate"),
             },
         ),
         RideRadarSensor(
