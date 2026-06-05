@@ -57,14 +57,17 @@ def test_default_dashboard_uses_native_entities_and_literal_markdown_tables() ->
     assert "Evaluatietabel" in readme
     assert "forecast_coverage" in readme
     assert "weather_fetch_summary" in readme
+    assert "duration_summary" in readme
+    assert "duration_preference_score" in readme
+    assert "routing_summary" in readme
     assert "Voorkeurs-aanrijtijd" in readme
     assert "Coming 8 dagen" not in readme
     assert "Forecast - direct" not in readme
     assert "Forecast - binnendoor" not in readme
     assert "Calls vandaag:" not in readme
     assert (
-        "| Status | Bestemming | Modus | Periode | Dagen | Score | Weer | Efficiëntie | Aanrijtijd | Reden | "
-        "Bewijs | Provider | Forecastlocatie | Cache | Ontbrekend |"
+        "| Status | Bestemming | Modus | Periode | Dagen | Duurvoorkeur | Score | Weer | Efficiëntie | "
+        "Aanrijtijd | Routing | Reden | Bewijs | Provider | Forecastlocatie | Cache | Ontbrekend |"
     ) in readme
     assert "Aanhanger vandaag beschikbaar" in readme
     assert "type: custom:flex-table-card" in readme

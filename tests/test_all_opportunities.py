@@ -67,6 +67,7 @@ async def test_all_opportunities_include_multiple_durations_and_strategies(hass)
     assert {item["duration_days"] for item in opportunities} == {2, 3, 4}
     assert {item["strategy"] for item in opportunities} == {"motorcycle_direct", "motorcycle_scenic"}
     assert {item["strategy_label"] for item in opportunities} == {"Direct / snelweg", "Binnendoor / scenic"}
+    assert all("duration_preference_score" in item for item in opportunities)
 
 
 async def test_all_opportunities_fields_are_sortable_and_scores_are_consistent(hass) -> None:
@@ -76,6 +77,8 @@ async def test_all_opportunities_fields_are_sortable_and_scores_are_consistent(h
     item = data["all_opportunities"][0]
 
     for field in ("score", "duration_days", "destination", "strategy", "start_date"):
+        assert field in item
+    for field in ("routing_provider", "routing_confidence", "routing_summary"):
         assert field in item
     assert item["score"] == item["ride_quality_score"]
     assert item["distance_km"] == item["route_distance_km"]

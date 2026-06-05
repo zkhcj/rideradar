@@ -6,8 +6,13 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from statistics import mean, pstdev
 
-from .const import DEFAULT_ACTIVITY_PROFILE
+from .const import (
+    DEFAULT_ACTIVITY_PROFILE,
+    DEFAULT_AVERAGE_SPEED_KMH,
+    DEFAULT_DETOUR_FACTOR,
+)
 from .models import DailyForecast, DestinationArea, RideExperience, RideScore, RouteInfo, TripScoreBreakdown, TripWindow
+from .routing import fallback_assumptions
 
 BAD_WEATHER_CODES = {
     51,
@@ -55,6 +60,7 @@ class TripPlanningProfile:
     max_approach_time_hours: float = 4.0
     preferred_max_approach_time_hours: float | None = None
     absolute_max_approach_time_hours: float | None = None
+    preferred_duration_days: int | None = None
     trailer_support_enabled: bool = False
     trailer_available: bool = False
 
@@ -83,12 +89,13 @@ DESTINATION_TRAFFIC_PROFILES = {
 
 RIDE_QUALITY_WEIGHTS = {
     "weather_score": 40,
-    "stability_score": 20,
+    "stability_score": 17,
     "temperature_score": 10,
     "distance_score": 10,
     "holiday_pressure_score": 10,
     "access_score": 5,
     "trip_efficiency_score": 5,
+    "duration_preference_score": 3,
 }
 
 
@@ -291,6 +298,10 @@ def calculate_ride_experience(
     distance_score = _distance_score(route.distance_km)
     temperature_score = _temperature_score([forecast for forecast in forecasts if forecast.date in window.daily_scores])
     trip_efficiency = calculate_trip_efficiency(route, window, planning_profile)
+    duration_preference_score = calculate_duration_preference_score(
+        window.duration_days,
+        planning_profile.preferred_duration_days,
+    )
     road_fun_score = int(profile["fun"])
 
     score_components = {
@@ -301,6 +312,7 @@ def calculate_ride_experience(
         "holiday_pressure_score": holiday_pressure_score,
         "access_score": access_score,
         "trip_efficiency_score": int(trip_efficiency["trip_efficiency_score"]),
+        "duration_preference_score": duration_preference_score,
     }
     ride_quality_score = _weighted_score(score_components, RIDE_QUALITY_WEIGHTS)
     score_caps = _score_caps(score_components)
@@ -335,6 +347,7 @@ def calculate_ride_experience(
         motorcycle_access_score=motorcycle_access_score,
         distance_score=distance_score,
         temperature_score=temperature_score,
+        duration_preference_score=duration_preference_score,
         trip_efficiency_score=int(trip_efficiency["trip_efficiency_score"]),
         travel_strategy=str(trip_efficiency["travel_strategy"]),
         approach_time_hours=float(trip_efficiency["approach_time_hours"]),
@@ -379,6 +392,20 @@ def ride_verdict(score: int) -> str:
     return "Not recommended"
 
 
+def calculate_duration_preference_score(duration_days: int, preferred_duration_days: int | None) -> int:
+    """Score how closely a candidate matches the preferred duration."""
+    if preferred_duration_days is None or preferred_duration_days <= 0:
+        return 100
+    difference = abs(duration_days - preferred_duration_days)
+    if difference == 0:
+        return 100
+    if difference == 1:
+        return 85
+    if difference == 2:
+        return 65
+    return max(35, 65 - ((difference - 2) * 15))
+
+
 def _weighted_score(components: dict[str, int], weights: dict[str, int]) -> int:
     total_weight = sum(weights.values())
     if total_weight <= 0:
@@ -408,9 +435,8 @@ def calculate_trip_efficiency(
     """Calculate how much of the selected trip can be spent riding the destination."""
     planning_profile = planning_profile or TripPlanningProfile()
     strategy = planning_profile.travel_strategy
-    approach_time_hours = route.travel_time_minutes / 60
+    approach_time_hours = _strategy_approach_time_hours(route, strategy)
     if strategy == "motorcycle_scenic":
-        approach_time_hours *= 1.18
         approach_enjoyment_factor = 0.45
     elif strategy == "trailer":
         approach_enjoyment_factor = 0.0
@@ -481,6 +507,17 @@ def calculate_trip_efficiency(
         "hard_exclusion_reasons": hard_exclusion_reasons,
         "exclusion_reasons": hard_exclusion_reasons,
     }
+
+
+def _strategy_approach_time_hours(route: RouteInfo, strategy: str) -> float:
+    if route.provider == "fallback" and route.direct_distance_km:
+        assumptions = fallback_assumptions(
+            strategy,
+            route.detour_factor or DEFAULT_DETOUR_FACTOR,
+            route.assumed_average_speed_kmh or DEFAULT_AVERAGE_SPEED_KMH,
+        )
+        return (route.direct_distance_km * assumptions["detour_factor"]) / assumptions["average_speed_kmh"]
+    return route.travel_time_minutes / 60
 
 
 def _bad_weather_penalty(scores: list[int], forecasts: list[DailyForecast]) -> float:

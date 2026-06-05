@@ -62,6 +62,12 @@ class RouteInfo:
     distance_km: float
     travel_time_minutes: int
     provider: str
+    confidence: str = "unknown"
+    distance_method: str | None = None
+    time_method: str | None = None
+    direct_distance_km: float | None = None
+    assumed_average_speed_kmh: float | None = None
+    detour_factor: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +154,7 @@ class RideExperience:
     motorcycle_access_score: int
     distance_score: int
     temperature_score: int
+    duration_preference_score: int
     trip_efficiency_score: int
     travel_strategy: str
     approach_time_hours: float

@@ -23,6 +23,7 @@ from custom_components.rideradar.const import (
 )
 from custom_components.rideradar.coordinator import RideRadarDataCoordinator
 from custom_components.rideradar.models import DailyForecast, DestinationArea, RouteInfo
+from custom_components.rideradar.routing import FallbackRoutingClient
 
 
 class FakeApiClient:
@@ -425,6 +426,61 @@ async def test_weather_score_zero_has_weather_evidence(hass) -> None:
     assert candidate["weather_evaluation"]["aggregate"]["total_precipitation_mm"] == 40
     assert candidate["weather_evaluation"]["penalties"]
     assert candidate["result"] == "compromise"
+
+
+async def test_duration_summary_exposes_best_candidate_per_duration(hass) -> None:
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        _entry(forecast_days=4),
+        FakeApiClient(
+            forecasts=[
+                _forecast_day("2026-06-04"),
+                _forecast_day("2026-06-05"),
+                _forecast_day("2026-06-06"),
+                _forecast_day("2026-06-07"),
+            ]
+        ),
+        FakeRoutingClient(distance_km=100),
+    )
+    coordinator.set_runtime_control("trip_duration", "3 days")
+
+    data = await coordinator._async_update_data()
+    duration_summary = data["evaluation_summary"]["duration_summary"]
+
+    assert set(duration_summary) == {2, 3, 4}
+    assert duration_summary[2]["candidate_count"] > 0
+    assert duration_summary[3]["candidate_count"] > 0
+    assert duration_summary[4]["candidate_count"] > 0
+    assert duration_summary[3]["best_candidate"]["duration_days"] == 3
+
+
+async def test_fallback_routing_metadata_is_exposed_for_vogezen(hass) -> None:
+    destinations = [DestinationArea("Vogezen", "Frankrijk", 48.0, 7.0).as_dict()]
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        _entry(destinations=destinations, max_distance=1350, forecast_days=3),
+        FakeApiClient(
+            forecasts=[
+                _forecast_day("2026-06-04"),
+                _forecast_day("2026-06-05"),
+                _forecast_day("2026-06-06"),
+            ]
+        ),
+        FallbackRoutingClient(),
+    )
+
+    data = await coordinator._async_update_data()
+    opportunity = data["opportunities"][0]
+
+    assert opportunity["destination"] == "Vogezen"
+    assert opportunity["routing_provider"] == "fallback"
+    assert opportunity["routing_confidence"] == "low"
+    assert opportunity["routing_distance_method"] == "haversine_detour"
+    assert opportunity["routing_time_method"] == "average_speed_estimate"
+    assert opportunity["direct_distance_km"] is not None
+    assert opportunity["assumed_average_speed_kmh"] >= 70
+    assert "fallbackschatting, geen echte route" in opportunity["routing_summary"]
+    assert any("Aangenomen gemiddelde snelheid" in item for item in opportunity["routing_evidence"])
 
 
 async def test_coordinator_marks_weather_unavailable_when_api_unavailable(hass) -> None:

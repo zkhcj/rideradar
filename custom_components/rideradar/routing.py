@@ -5,7 +5,13 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from math import asin, cos, radians, sin, sqrt
 
-from .const import DEFAULT_AVERAGE_SPEED_KMH, DEFAULT_DETOUR_FACTOR
+from .const import (
+    DEFAULT_AVERAGE_SPEED_KMH,
+    DEFAULT_DETOUR_FACTOR,
+    TRAVEL_STRATEGY_MOTORCYCLE_DIRECT,
+    TRAVEL_STRATEGY_MOTORCYCLE_SCENIC,
+    TRAVEL_STRATEGY_TRAILER,
+)
 from .models import DestinationArea, RouteInfo
 
 
@@ -52,13 +58,44 @@ class FallbackRoutingClient(RoutingClient):
             destination.latitude,
             destination.longitude,
         )
-        distance_km = direct_distance_km * self._detour_factor
-        travel_time_minutes = round((distance_km / self._average_speed_kmh) * 60)
+        assumptions = fallback_assumptions(activity_profile, self._detour_factor, self._average_speed_kmh)
+        distance_km = direct_distance_km * assumptions["detour_factor"]
+        travel_time_minutes = round((distance_km / assumptions["average_speed_kmh"]) * 60)
         return RouteInfo(
             distance_km=round(distance_km, 1),
             travel_time_minutes=max(1, travel_time_minutes),
-            provider=f"fallback_detour_{self._detour_factor:g}_{activity_profile}",
+            provider="fallback",
+            confidence="low",
+            distance_method="haversine_detour",
+            time_method="average_speed_estimate",
+            direct_distance_km=round(direct_distance_km, 1),
+            assumed_average_speed_kmh=assumptions["average_speed_kmh"],
+            detour_factor=assumptions["detour_factor"],
         )
+
+
+def fallback_assumptions(activity_profile: str, detour_factor: float, average_speed_kmh: float) -> dict[str, float]:
+    """Return strategy-aware fallback assumptions."""
+    normalized = activity_profile.strip().casefold()
+    if normalized == TRAVEL_STRATEGY_MOTORCYCLE_SCENIC:
+        return {
+            "detour_factor": max(detour_factor, 1.35),
+            "average_speed_kmh": min(average_speed_kmh, 58.0),
+        }
+    if normalized == TRAVEL_STRATEGY_TRAILER:
+        return {
+            "detour_factor": max(detour_factor, 1.2),
+            "average_speed_kmh": max(average_speed_kmh, 78.0),
+        }
+    if normalized == TRAVEL_STRATEGY_MOTORCYCLE_DIRECT:
+        return {
+            "detour_factor": max(detour_factor, 1.18),
+            "average_speed_kmh": max(average_speed_kmh, 82.0),
+        }
+    return {
+        "detour_factor": detour_factor,
+        "average_speed_kmh": average_speed_kmh,
+    }
 
 
 def haversine_distance_km(

@@ -5,6 +5,7 @@ from custom_components.rideradar.scoring import (
     RIDE_QUALITY_WEIGHTS,
     TripPlanningProfile,
     calculate_best_trip_window,
+    calculate_duration_preference_score,
     calculate_ride_experience,
     calculate_ride_score,
     calculate_trip_efficiency,
@@ -253,3 +254,35 @@ def test_poor_weather_score_caps_ride_quality_at_60() -> None:
 def test_ride_quality_weights_sum_to_100() -> None:
     assert sum(RIDE_QUALITY_WEIGHTS.values()) == 100
     assert RIDE_QUALITY_WEIGHTS["weather_score"] == 40
+    assert RIDE_QUALITY_WEIGHTS["duration_preference_score"] == 3
+
+
+def test_duration_preference_score_curve_is_soft() -> None:
+    assert calculate_duration_preference_score(3, 3) == 100
+    assert calculate_duration_preference_score(2, 3) == 85
+    assert calculate_duration_preference_score(4, 2) == 65
+    assert calculate_duration_preference_score(6, 2) == 35
+
+
+def test_preferred_duration_affects_ride_quality_without_excluding() -> None:
+    forecasts = [
+        DailyForecast("2026-06-06", 22, 0, 0, 10, 15, 20, 1),
+        DailyForecast("2026-06-07", 22, 0, 0, 10, 15, 20, 1),
+        DailyForecast("2026-06-08", 22, 0, 0, 10, 15, 20, 1),
+    ]
+    two_day = calculate_best_trip_window(forecasts[:2], 2)
+    three_day = calculate_best_trip_window(forecasts, 3)
+
+    assert two_day is not None
+    assert three_day is not None
+    destination = DestinationArea("Sauerland", "Duitsland", 51.18, 8.25)
+    route = RouteInfo(180, 120, "test")
+    profile = TripPlanningProfile(preferred_duration_days=3)
+
+    two_day_experience = calculate_ride_experience(destination, route, two_day, forecasts[:2], profile)
+    three_day_experience = calculate_ride_experience(destination, route, three_day, forecasts, profile)
+
+    assert two_day_experience.duration_preference_score == 85
+    assert three_day_experience.duration_preference_score == 100
+    assert not two_day_experience.exclusion_reasons
+    assert three_day_experience.ride_quality_score >= two_day_experience.ride_quality_score

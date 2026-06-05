@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -37,6 +37,7 @@ from .const import (
     CONTROL_WEEKEND_ONLY,
     DEFAULT_ACTIVITY_PROFILE,
     DEFAULT_AVAILABLE_HOURS_PER_DAY,
+    DEFAULT_AVERAGE_SPEED_KMH,
     DEFAULT_CUSTOM_TRIP_DURATION_DAYS,
     DEFAULT_DETOUR_FACTOR,
     DEFAULT_DURATION_MODE,
@@ -57,7 +58,7 @@ from .const import (
 )
 from .destinations import all_destinations_for_options, destinations_from_config
 from .models import DestinationArea, DestinationResult, RideRadarConfigError
-from .routing import FallbackRoutingClient, RoutingClient
+from .routing import FallbackRoutingClient, RoutingClient, fallback_assumptions
 from .scoring import (
     TripPlanningProfile,
     calculate_ride_experience,
@@ -210,6 +211,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             forecast_days = self._forecast_days_selection(config)
             trip_duration = self._trip_duration_selection(config, forecast_days)
             planning_profile = self._trip_planning_profile(config)
+            planning_profile = replace(planning_profile, preferred_duration_days=trip_duration.max_days)
             window_preferences = self._window_preferences()
             active_helpers = self._active_helper_states()
             disabled_destinations = _disabled_destinations(config)
@@ -286,6 +288,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             forecast_days = self._forecast_days_selection(config)
             trip_duration = self._trip_duration_selection(config, forecast_days)
             planning_profile = self._trip_planning_profile(config)
+            planning_profile = replace(planning_profile, preferred_duration_days=trip_duration.max_days)
             window_preferences = self._window_preferences()
             active_helpers = self._active_helper_states()
             activity_profile = str(config.get(CONF_ACTIVITY_PROFILE, DEFAULT_ACTIVITY_PROFILE))
@@ -408,6 +411,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         evaluated_candidates = _evaluated_candidates(opportunities, all_opportunities, excluded_destinations)
         evaluation_summary = _evaluation_summary(evaluated_candidates)
         evaluation_summary["disabled_modes"] = _disabled_modes_from_status(_mode_status(planning_profile))
+        evaluation_summary["duration_summary"] = _duration_summary(evaluated_candidates)
         advice_candidate = _advice_candidate(evaluated_candidates)
         if LOGGER.isEnabledFor(logging.DEBUG):
             LOGGER.debug(
@@ -486,7 +490,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             start_latitude,
             start_longitude,
             destination,
-            activity_profile,
+            planning_profile.travel_strategy,
         )
         if route.distance_km > max_route_distance_km:
             return DestinationResult(
@@ -521,7 +525,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 ),
             )
 
-        absolute_approach_time = _route_approach_time_for_strategy(route.travel_time_minutes, planning_profile)
+        absolute_approach_time = _route_approach_time_for_strategy(route, planning_profile)
         if (
             planning_profile.absolute_max_approach_time_hours is not None
             and absolute_approach_time > planning_profile.absolute_max_approach_time_hours
@@ -766,6 +770,7 @@ def _opportunity_payload(
     window_preferences: WindowPreferences,
     active_helpers: dict[str, str | None],
 ) -> dict[str, Any]:
+    routing = _routing_payload(result.route, experience.travel_strategy, experience.approach_time_hours)
     opportunity = {
         "destination": result.destination.name,
         "start_date": window.start_day,
@@ -792,6 +797,7 @@ def _opportunity_payload(
         "access_status": _access_status(experience.motorcycle_access_score),
         "distance_score": experience.distance_score,
         "temperature_score": experience.temperature_score,
+        "duration_preference_score": experience.duration_preference_score,
         "trip_efficiency_score": experience.trip_efficiency_score,
         "score_weights": experience.score_weights,
         "score_caps": experience.score_caps,
@@ -826,6 +832,7 @@ def _opportunity_payload(
         "route_distance_km": result.route.distance_km,
         "distance_km": result.route.distance_km,
         "estimated_travel_time": _format_minutes(result.route.travel_time_minutes),
+        **routing,
         "daily_scores": window.daily_scores,
         "weather_evaluation": _weather_evaluation(result.forecasts, window),
         "verdict": _window_verdict(experience.ride_quality_score, _is_weekend_window(window)),
@@ -883,6 +890,7 @@ def _all_opportunity_strategy_profiles(planning_profile: TripPlanningProfile) ->
             max_approach_time_hours=planning_profile.max_approach_time_hours,
             preferred_max_approach_time_hours=planning_profile.preferred_max_approach_time_hours,
             absolute_max_approach_time_hours=planning_profile.absolute_max_approach_time_hours,
+            preferred_duration_days=planning_profile.preferred_duration_days,
             trailer_support_enabled=planning_profile.trailer_support_enabled,
             trailer_available=planning_profile.trailer_available,
         )
@@ -907,6 +915,7 @@ def _compact_table_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
         "duration_days": opportunity["duration_days"],
         "preferred_duration_days": opportunity.get("preferred_duration_days"),
         "preferred_duration_difference_days": opportunity.get("preferred_duration_difference_days"),
+        "duration_preference_score": opportunity.get("duration_preference_score"),
         "period": opportunity["period"],
         "start_date": opportunity["start_date"],
         "end_date": opportunity["end_date"],
@@ -929,6 +938,9 @@ def _compact_table_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
         "weather_provider_used": opportunity.get("weather_provider_used"),
         "forecast_location_name": opportunity.get("forecast_location_name"),
         "forecast_cache_age_hours": opportunity.get("forecast_cache_age_hours"),
+        "routing_provider": opportunity.get("routing_provider"),
+        "routing_confidence": opportunity.get("routing_confidence"),
+        "routing_summary": opportunity.get("routing_summary"),
     }
 
 
@@ -1086,6 +1098,53 @@ def _temperature_penalty(temperature: float) -> int:
     return 0
 
 
+def _routing_payload(route: Any, strategy: str, approach_time_hours: float) -> dict[str, Any]:
+    provider = str(getattr(route, "provider", "unknown") or "unknown")
+    confidence = str(getattr(route, "confidence", "unknown") or "unknown")
+    direct_distance = getattr(route, "direct_distance_km", None)
+    detour_factor = getattr(route, "detour_factor", None)
+    average_speed = getattr(route, "assumed_average_speed_kmh", None)
+    distance_method = getattr(route, "distance_method", None)
+    time_method = getattr(route, "time_method", None)
+    if provider == "fallback":
+        assumptions = fallback_assumptions(
+            strategy,
+            float(detour_factor or DEFAULT_DETOUR_FACTOR),
+            float(average_speed or DEFAULT_AVERAGE_SPEED_KMH),
+        )
+        detour_factor = assumptions["detour_factor"]
+        average_speed = assumptions["average_speed_kmh"]
+        estimated_route_distance = round(float(direct_distance or route.distance_km) * detour_factor, 1)
+        routing_summary = (
+            "Geschatte aanrijtijd; fallbackschatting, geen echte route. "
+            f"Aangenomen afstand {estimated_route_distance:.0f} km, gemiddelde snelheid {average_speed:.0f} km/u."
+        )
+        evidence = [
+            "Berekening: fallbackschatting, geen echte route.",
+            f"Directe afstand: {float(direct_distance or 0):.0f} km.",
+            f"Aangenomen routeafstand: {estimated_route_distance:.0f} km.",
+            f"Aangenomen gemiddelde snelheid: {average_speed:.0f} km/u.",
+            f"Geschatte aanrijtijd: {approach_time_hours:.1f} uur.",
+        ]
+    else:
+        estimated_route_distance = route.distance_km
+        routing_summary = "Routegegevens komen van de geconfigureerde routingprovider."
+        evidence = [routing_summary]
+    return {
+        "routing_provider": provider,
+        "routing_confidence": confidence,
+        "routing_distance_method": distance_method,
+        "routing_time_method": time_method,
+        "direct_distance_km": direct_distance,
+        "estimated_route_distance_km": estimated_route_distance,
+        "assumed_average_speed_kmh": average_speed,
+        "detour_factor": detour_factor,
+        "routing_summary": routing_summary,
+        "routing_evidence": evidence,
+        "routing_warning": "Fallbackschatting met laag vertrouwen" if provider == "fallback" else None,
+    }
+
+
 def _strategy_label(strategy: str) -> str:
     return {
         TRAVEL_STRATEGY_MOTORCYCLE_DIRECT: "Direct / snelweg",
@@ -1206,11 +1265,15 @@ def _disabled_modes_from_status(mode_status: dict[str, dict[str, Any]]) -> dict[
     }
 
 
-def _route_approach_time_for_strategy(travel_time_minutes: int, planning_profile: TripPlanningProfile) -> float:
-    approach_time = travel_time_minutes / 60
-    if planning_profile.travel_strategy == TRAVEL_STRATEGY_MOTORCYCLE_SCENIC:
-        return approach_time * 1.18
-    return approach_time
+def _route_approach_time_for_strategy(route: Any, planning_profile: TripPlanningProfile) -> float:
+    if route.provider == "fallback" and route.direct_distance_km:
+        assumptions = fallback_assumptions(
+            planning_profile.travel_strategy,
+            route.detour_factor or DEFAULT_DETOUR_FACTOR,
+            route.assumed_average_speed_kmh or DEFAULT_AVERAGE_SPEED_KMH,
+        )
+        return (route.direct_distance_km * assumptions["detour_factor"]) / assumptions["average_speed_kmh"]
+    return route.travel_time_minutes / 60
 
 
 def _main_reason(destination: str, experience: Any, window: Any) -> str:
@@ -1239,6 +1302,7 @@ def _ranked_opportunities(opportunities: list[dict[str, Any]]) -> list[dict[str,
             -int(item["stability_score"]),
             -int(item["holiday_pressure_score"]),
             -int(item["distance_score"]),
+            -int(item.get("duration_preference_score", 0)),
             str(item["start_date"]),
         ),
     )
@@ -1332,6 +1396,7 @@ def _compact_strategy_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]
         "weather_score": opportunity["weather_score"],
         "stability_score": opportunity["stability_score"],
         "trip_efficiency_score": opportunity["trip_efficiency_score"],
+        "duration_preference_score": opportunity.get("duration_preference_score"),
         "distance_score": opportunity["distance_score"],
         "main_reason": opportunity["main_reason"],
         "main_tradeoff": opportunity["main_tradeoff"],
@@ -1339,6 +1404,9 @@ def _compact_strategy_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]
         "weather_provider_used": opportunity.get("weather_provider_used"),
         "forecast_location_name": opportunity.get("forecast_location_name"),
         "forecast_cache_age_hours": opportunity.get("forecast_cache_age_hours"),
+        "routing_provider": opportunity.get("routing_provider"),
+        "routing_confidence": opportunity.get("routing_confidence"),
+        "routing_summary": opportunity.get("routing_summary"),
     }
 
 
@@ -1352,12 +1420,16 @@ def _strategy_rejection_summary(opportunity: dict[str, Any] | None) -> dict[str,
         "duration_days": opportunity["duration_days"],
         "strategy": opportunity["strategy"],
         "strategy_label": opportunity["strategy_label"],
+        "duration_preference_score": opportunity.get("duration_preference_score"),
         "main_reason": opportunity["main_reason"],
         "main_tradeoff": opportunity["main_tradeoff"],
         "weather_status": opportunity.get("weather_status"),
         "weather_provider_used": opportunity.get("weather_provider_used"),
         "forecast_location_name": opportunity.get("forecast_location_name"),
         "forecast_cache_age_hours": opportunity.get("forecast_cache_age_hours"),
+        "routing_provider": opportunity.get("routing_provider"),
+        "routing_confidence": opportunity.get("routing_confidence"),
+        "routing_summary": opportunity.get("routing_summary"),
     }
 
 
@@ -1431,6 +1503,9 @@ def _candidate_from_opportunity(opportunity: dict[str, Any], result: str) -> dic
         "period_start": opportunity.get("start_date"),
         "period_end": opportunity.get("end_date"),
         "duration_days": opportunity.get("duration_days"),
+        "preferred_duration_days": opportunity.get("preferred_duration_days"),
+        "preferred_duration_difference_days": opportunity.get("preferred_duration_difference_days"),
+        "duration_preference_score": opportunity.get("duration_preference_score"),
         "total_score": opportunity.get("ride_quality_score"),
         "weather_score": opportunity.get("weather_score"),
         "stability_score": opportunity.get("stability_score"),
@@ -1453,6 +1528,10 @@ def _candidate_from_opportunity(opportunity: dict[str, Any], result: str) -> dic
         "preference_warnings": opportunity.get("preference_warnings", []),
         "hard_exclusion_reasons": opportunity.get("hard_exclusion_reasons", []),
         "weather_provider": opportunity.get("weather_provider_used"),
+        "routing_provider": opportunity.get("routing_provider"),
+        "routing_confidence": opportunity.get("routing_confidence"),
+        "routing_summary": opportunity.get("routing_summary"),
+        "routing_evidence": opportunity.get("routing_evidence", []),
         "forecast_location": opportunity.get("forecast_location_name"),
         "weather_status": opportunity.get("weather_status"),
         "cache_age_hours": opportunity.get("forecast_cache_age_hours"),
@@ -1465,6 +1544,7 @@ def _candidate_from_opportunity(opportunity: dict[str, Any], result: str) -> dic
             "stability": score_breakdown.get("stability_score"),
             "temperature": score_breakdown.get("temperature_score"),
             "trip_efficiency": score_breakdown.get("trip_efficiency_score"),
+            "duration_preference": score_breakdown.get("duration_preference_score"),
             "final": score_breakdown.get("ride_quality_score"),
         },
         "weather_evaluation": opportunity.get("weather_evaluation"),
@@ -1532,6 +1612,7 @@ def _opportunity_evidence(opportunity: dict[str, Any], result: str) -> list[str]
         f"Totaalscore {score}/100; adviesdrempel 70.",
         f"Weerscore {weather}/100.",
         f"Duur {duration} dagen.",
+        f"Duurvoorkeur-score {opportunity.get('duration_preference_score', 'n.b.')}/100.",
     ]
     preferred_duration = opportunity.get("preferred_duration_days")
     if preferred_duration is not None and preferred_duration != duration:
@@ -1592,6 +1673,49 @@ def _evaluation_summary(candidates: list[dict[str, Any]]) -> dict[str, Any]:
         "compromise_reason_counts": compromise_reason_counts,
         "compromise_reason_labels": {reason: _reason_label(reason) for reason in compromise_reason_counts},
     }
+
+
+def _duration_summary(candidates: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
+    summary: dict[int, dict[str, Any]] = {}
+    for candidate in candidates:
+        try:
+            duration = int(candidate.get("duration_days"))
+        except (TypeError, ValueError):
+            continue
+        result = str(candidate.get("result") or "unavailable")
+        bucket = summary.setdefault(
+            duration,
+            {
+                "candidate_count": 0,
+                "recommended": 0,
+                "eligible": 0,
+                "compromises": 0,
+                "rejected": 0,
+                "unavailable": 0,
+                "best_score": None,
+                "best_candidate": None,
+                "main_reason": None,
+            },
+        )
+        bucket["candidate_count"] += 1
+        if result == "compromise":
+            bucket["compromises"] += 1
+        elif result in bucket:
+            bucket[result] += 1
+        score = candidate.get("total_score")
+        if score is not None and (bucket["best_score"] is None or int(score) > int(bucket["best_score"])):
+            bucket["best_score"] = int(score)
+            bucket["best_candidate"] = {
+                "destination": candidate.get("destination"),
+                "score": int(score),
+                "period": candidate.get("period"),
+                "duration_days": duration,
+                "result": result,
+                "reason": candidate.get("primary_reason"),
+                "evidence": candidate.get("supporting_evidence"),
+            }
+            bucket["main_reason"] = candidate.get("supporting_evidence")
+    return dict(sorted(summary.items()))
 
 
 def _advice_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -2406,6 +2530,7 @@ def _score_breakdown(experience: Any, window: Any) -> dict[str, int]:
         "holiday_pressure_score": experience.holiday_pressure_score,
         "access_score": experience.access_score,
         "trip_efficiency_score": experience.trip_efficiency_score,
+        "duration_preference_score": experience.duration_preference_score,
         "ride_quality_score": experience.ride_quality_score,
     }
 
@@ -2423,7 +2548,8 @@ def _recommendation_reason(destination: str, experience: Any, window: Any) -> st
         f"{destination} is het {quality}: weer {experience.weather_score}/100, "
         f"stabiliteit {window.weather_stability_score}/100, afstand {experience.distance_score}/100, "
         f"vakantiedruk {experience.holiday_pressure_score}/100, toegang {experience.access_score}/100, "
-        f"ritefficientie {experience.trip_efficiency_score}/100."
+        f"ritefficientie {experience.trip_efficiency_score}/100, "
+        f"duurvoorkeur {experience.duration_preference_score}/100."
     )
 
 

@@ -46,12 +46,13 @@ Default `ride_quality_score` weights:
 | Component | Weight |
 | --- | ---: |
 | `weather_score` | 40% |
-| `stability_score` | 20% |
+| `stability_score` | 17% |
 | `temperature_score` | 10% |
 | `distance_score` | 10% |
 | `holiday_pressure_score` | 10% |
 | `access_score` | 5% |
 | `trip_efficiency_score` | 5% |
+| `duration_preference_score` | 3% |
 
 Bad weather is gated. If `weather_score` is below 25, RideRadar caps the final score at 60. If `weather_score` is 0, the final score is capped at 50. If both weather and stability are 0, the final score is capped at 45. Below 70, the hero treats the result as the least compromised option instead of a strong recommendation.
 
@@ -70,6 +71,17 @@ Preferences influence ranking and compromise labels, but do not reject a candida
 The native dashboard entity `number.rideradar_max_approach_time_hours` is a preferred approach-time target. Existing `max_approach_time_hours` values are treated as `preferred_max_approach_time_hours` for backwards compatibility. They reduce `trip_efficiency_score` when exceeded, but they do not reject Harz, Sauerland or another destination. A hard approach-time rejection only happens when `absolute_max_approach_time_hours` is configured separately.
 
 Preferred trip duration works the same way. A 3-day preference gives context to ranking and evidence, but a strong 2-day Sauerland ride can still become the recommendation when it is the highest eligible candidate. RideRadar evaluates 2-day through the preferred maximum duration for normal multi-day planning, and 1-day windows only when the selected duration is one day or flexible mode explicitly includes them.
+
+Duration preference is an explicit bounded score component:
+
+| Difference from preferred duration | `duration_preference_score` |
+| ---: | ---: |
+| exact match | 100 |
+| 1 day | 85 |
+| 2 days | 65 |
+| 3+ days | 35+ |
+
+This component has a modest 3% weight. It helps a good 3-day trip outrank a similar 2-day trip when 3 days is preferred, but it cannot hide an excellent shorter or longer trip.
 
 Candidate categories:
 
@@ -93,6 +105,16 @@ destination_ride_time_ratio = usable_destination_time / total_available_time
 ```
 
 A four-hour approach can be poor for a one-day ride but acceptable for a three-day or four-day trip. Candidate evidence exposes approach time, return time, transport time, available trip hours, usable destination hours, preferred approach overrun, absolute approach limit and trip-efficiency score.
+
+Fallback routing is clearly marked. When no real routing provider is configured, RideRadar estimates route distance from direct haversine distance, detour factor and a strategy-specific average speed. It exposes `routing_provider: fallback`, `routing_confidence: low`, `routing_distance_method: haversine_detour`, `routing_time_method: average_speed_estimate`, direct distance, estimated route distance, assumed speed and detour factor. A Vogezen approach time such as 8 hours and 48 minutes is therefore shown as a fallback estimate, not a confirmed route.
+
+Fallback strategy assumptions:
+
+| Strategy | Purpose | Fallback behavior |
+| --- | --- | --- |
+| Direct / snelweg | Fastest practical motorcycle approach | motorway-oriented average speed |
+| Binnendoor / scenic | More enjoyable non-motorway approach | higher detour and lower average speed |
+| Aanhanger | Car/trailer transport | separate car/trailer speed assumptions |
 
 Weather scores include an audit trail in the evaluated candidate data. For low or zero weather scores, the debug dashboard can show precipitation amount, rain probability, temperature, wind, gusts, cloud cover, weather code, daily scores and applied penalties. Longer windows are scored by daily scores plus a bounded bad-weather penalty; they do not receive extra penalties merely because they contain more days.
 
@@ -231,6 +253,23 @@ sections:
           {% else %}
           Geen afwijzingen.
           {% endif %}
+
+      - type: markdown
+        title: Beste optie per duur
+        content: |
+          {% set eval = state_attr('sensor.rideradar_evaluation_summary', 'evaluation_summary') or {} %}
+          {% set eval = eval if eval is mapping else {} %}
+          {% set durations = eval.get('duration_summary', {}) if eval.get('duration_summary', {}) is mapping else {} %}
+          {% for days, info in durations.items() %}
+          {% set info = info if info is mapping else {} %}
+          {% set best = info.get('best_candidate', {}) if info.get('best_candidate', {}) is mapping else {} %}
+          **Beste {{ days }}-daagse optie:** {{ best.get('destination', 'geen') }} · {{ best.get('score', 'n.b.') }}/100 · {{ best.get('period', 'geen periode') }}
+
+          {{ best.get('evidence', info.get('main_reason', 'Geen onderbouwing beschikbaar.')) }}
+
+          {% else %}
+          Nog geen duurvergelijking beschikbaar.
+          {% endfor %}
 
           {% if compromise_counts %}
           Compromisredenen:
@@ -371,13 +410,13 @@ sections:
         title: Evaluatietabel
         content: |
           {% set rows = state_attr('sensor.rideradar_evaluation_summary', 'evaluated_candidates') or [] %}
-          | Status | Bestemming | Modus | Periode | Dagen | Score | Weer | Efficiëntie | Aanrijtijd | Reden | Bewijs | Provider | Forecastlocatie | Cache | Ontbrekend |
-          |---|---|---|---|---:|---:|---:|---:|---:|---|---|---|---|---:|---|
+          | Status | Bestemming | Modus | Periode | Dagen | Duurvoorkeur | Score | Weer | Efficiëntie | Aanrijtijd | Routing | Reden | Bewijs | Provider | Forecastlocatie | Cache | Ontbrekend |
+          |---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|---|---|---|---:|---|
           {% for item in rows %}
           {% set item = item if item is mapping else {} %}
-          | {{ item.get('eligibility_result', 'n.b.') }} | {{ item.get('destination', 'n.b.') }} | {{ item.get('mode_label', 'n.v.t.') }} | {{ item.get('period', 'n.b.') }} | {{ item.get('duration_days', 'n.b.') }} | {{ item.get('total_score', 'n.b.') }} | {{ item.get('weather_score', 'n.b.') }} | {{ item.get('trip_efficiency_score', 'n.b.') }} | {{ item.get('approach_time_hours', 'n.b.') }} u | {{ item.get('primary_reason', 'n.b.') }} | {{ item.get('supporting_evidence', 'Geen bewijs beschikbaar.') }} | {{ item.get('weather_provider', 'n.b.') }} | {{ item.get('forecast_location', 'n.b.') }} | {{ item.get('cache_age_minutes', 'n.b.') }} min | {{ item.get('missing_data', []) | join(', ') if item.get('missing_data') else '-' }} |
+          | {{ item.get('eligibility_result', 'n.b.') }} | {{ item.get('destination', 'n.b.') }} | {{ item.get('mode_label', 'n.v.t.') }} | {{ item.get('period', 'n.b.') }} | {{ item.get('duration_days', 'n.b.') }} | {{ item.get('duration_preference_score', 'n.b.') }} | {{ item.get('total_score', 'n.b.') }} | {{ item.get('weather_score', 'n.b.') }} | {{ item.get('trip_efficiency_score', 'n.b.') }} | {{ item.get('approach_time_hours', 'n.b.') }} u | {{ item.get('routing_summary', item.get('routing_provider', 'n.b.')) }} | {{ item.get('primary_reason', 'n.b.') }} | {{ item.get('supporting_evidence', 'Geen bewijs beschikbaar.') }} | {{ item.get('weather_provider', 'n.b.') }} | {{ item.get('forecast_location', 'n.b.') }} | {{ item.get('cache_age_minutes', 'n.b.') }} min | {{ item.get('missing_data', []) | join(', ') if item.get('missing_data') else '-' }} |
           {% else %}
-          | Geen kandidaten | - | - | - | - | - | - | - | - | Wachten op data | RideRadar heeft nog geen evaluatie gemaakt. | - | - | - | - |
+          | Geen kandidaten | - | - | - | - | - | - | - | - | - | - | Wachten op data | RideRadar heeft nog geen evaluatie gemaakt. | - | - | - | - |
           {% endfor %}
 ```
 
@@ -431,6 +470,8 @@ sections:
             data: opportunities.strategy_label
           - name: Dagen
             data: opportunities.duration_days
+          - name: Duurvoorkeur
+            data: opportunities.duration_preference_score
           - name: Periode
             data: opportunities.period
           - name: Weer
@@ -443,6 +484,8 @@ sections:
             data: opportunities.distance_km
           - name: Aanrijtijd
             data: opportunities.approach_time_hours
+          - name: Routing
+            data: opportunities.routing_confidence
           - name: Reden
             data: opportunities.main_reason
       - type: markdown
@@ -462,13 +505,13 @@ type: markdown
 title: Alle RideRadar opties
 content: |
   {% set rows = state_attr('sensor.rideradar_all_opportunities', 'opportunities') or [] %}
-  | Score | Bestemming | Strategie | Dagen | Periode | Weer | Stabiliteit | Efficiëntie | Afstand | Aanrijtijd |
-  |---:|---|---|---:|---|---:|---:|---:|---:|---:|
+  | Score | Bestemming | Strategie | Dagen | Duurvoorkeur | Periode | Weer | Stabiliteit | Efficiëntie | Afstand | Aanrijtijd | Routing |
+  |---:|---|---|---:|---:|---|---:|---:|---:|---:|---:|---|
   {% for item in rows %}
   {% set item = item if item is mapping else {} %}
-  | {{ item.get('score', 'n.b.') }} | {{ item.get('destination', 'n.b.') }} | {{ item.get('strategy_label', 'n.b.') }} | {{ item.get('duration_days', 'n.b.') }} | {{ item.get('period', 'n.b.') }} | {{ item.get('weather_score', 'n.b.') }} | {{ item.get('stability_score', 'n.b.') }} | {{ item.get('trip_efficiency_score', 'n.b.') }} | {{ item.get('distance_km', 0) | round(0) }} km | {{ item.get('approach_time_hours', 0) | round(1) }} u |
+  | {{ item.get('score', 'n.b.') }} | {{ item.get('destination', 'n.b.') }} | {{ item.get('strategy_label', 'n.b.') }} | {{ item.get('duration_days', 'n.b.') }} | {{ item.get('duration_preference_score', 'n.b.') }} | {{ item.get('period', 'n.b.') }} | {{ item.get('weather_score', 'n.b.') }} | {{ item.get('stability_score', 'n.b.') }} | {{ item.get('trip_efficiency_score', 'n.b.') }} | {{ item.get('distance_km', 0) | round(0) }} km | {{ item.get('approach_time_hours', 0) | round(1) }} u | {{ item.get('routing_confidence', 'n.b.') }} |
   {% else %}
-  | - | Nog geen opties beschikbaar | - | - | RideRadar wacht op forecast-data of alle kandidaten zijn onder de zichtbare drempel. | - | - | - | - | - |
+  | - | Nog geen opties beschikbaar | - | - | - | RideRadar wacht op forecast-data of alle kandidaten zijn onder de zichtbare drempel. | - | - | - | - | - | - |
   {% endfor %}
 ```
 
