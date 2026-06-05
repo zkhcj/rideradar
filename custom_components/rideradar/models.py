@@ -168,6 +168,11 @@ class RideExperience:
     absolute_max_approach_time_hours: float | None
     preferred_approach_time_overrun_hours: float
     absolute_approach_time_overrun_hours: float
+    normal_max_approach_time_hours: float | None
+    joker_max_approach_time_hours: float | None
+    normal_limit_overrun_minutes: int
+    joker_limit_overrun_minutes: int
+    approach_time_classification: str
     preference_warnings: list[str]
     hard_exclusion_reasons: list[str]
     score_weights: dict[str, int]

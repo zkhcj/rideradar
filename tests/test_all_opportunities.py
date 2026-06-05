@@ -13,6 +13,7 @@ from custom_components.rideradar.const import (
     CONF_START_LATITUDE,
     CONF_START_LONGITUDE,
     CONF_TRAILER_SUPPORT_ENABLED,
+    CONF_TRAVEL_MODES,
     DEFAULT_ACTIVITY_PROFILE,
     DEFAULT_DETOUR_FACTOR,
     DOMAIN,
@@ -37,24 +38,52 @@ class FakeRoutingClient:
         return RouteInfo(80, 45, "fake")
 
 
-def _entry(trailer_support_enabled=False, destinations=None):
+def _entry(trailer_support_enabled=False, destinations=None, options=None):
+    data = {
+        CONF_START_ADDRESS: "Private start",
+        CONF_START_LATITUDE: 50.0,
+        CONF_START_LONGITUDE: 4.0,
+        CONF_MAX_ROUTE_DISTANCE_KM: 500,
+        CONF_FORECAST_DAYS: 4,
+        CONF_PREFERRED_TRIP_DURATION: "2",
+        CONF_CUSTOM_TRIP_DURATION_DAYS: 4,
+        CONF_ACTIVITY_PROFILE: DEFAULT_ACTIVITY_PROFILE,
+        CONF_DETOUR_FACTOR: DEFAULT_DETOUR_FACTOR,
+        "custom_destinations": destinations or [DestinationArea("Sauerland", "Germany", 51.0, 8.0).as_dict()],
+        "enabled_default_destinations": [],
+        CONF_TRAILER_SUPPORT_ENABLED: trailer_support_enabled,
+    }
+    if options and CONF_TRAVEL_MODES in options:
+        data[CONF_TRAVEL_MODES] = options[CONF_TRAVEL_MODES]
     return MockConfigEntry(
         domain=DOMAIN,
-        data={
-            CONF_START_ADDRESS: "Private start",
-            CONF_START_LATITUDE: 50.0,
-            CONF_START_LONGITUDE: 4.0,
-            CONF_MAX_ROUTE_DISTANCE_KM: 500,
-            CONF_FORECAST_DAYS: 4,
-            CONF_PREFERRED_TRIP_DURATION: "2",
-            CONF_CUSTOM_TRIP_DURATION_DAYS: 4,
-            CONF_ACTIVITY_PROFILE: DEFAULT_ACTIVITY_PROFILE,
-            CONF_DETOUR_FACTOR: DEFAULT_DETOUR_FACTOR,
-            "custom_destinations": destinations or [DestinationArea("Sauerland", "Germany", 51.0, 8.0).as_dict()],
-            "enabled_default_destinations": [],
-            CONF_TRAILER_SUPPORT_ENABLED: trailer_support_enabled,
-        },
+        data=data,
+        options=options or {},
     )
+
+
+def _entry_with_modes(travel_modes, destinations=None):
+    return _entry(destinations=destinations, options={CONF_TRAVEL_MODES: travel_modes})
+
+
+def _travel_modes(*, direct=True, scenic=True, trailer=False, direct_normal=3.0, direct_joker=3.5):
+    return {
+        "motorcycle_direct": {
+            "enabled": direct,
+            "normal_max_approach_time_hours": direct_normal,
+            "joker_max_approach_time_hours": direct_joker,
+        },
+        "motorcycle_scenic": {
+            "enabled": scenic,
+            "normal_max_approach_time_hours": 2.5,
+            "joker_max_approach_time_hours": 3.0,
+        },
+        "trailer": {
+            "enabled": trailer,
+            "normal_max_approach_time_hours": 4.0,
+            "joker_max_approach_time_hours": 5.0,
+        },
+    }
 
 
 async def test_all_opportunities_include_multiple_durations_and_strategies(hass) -> None:
@@ -108,7 +137,7 @@ async def test_all_opportunities_hide_trailer_when_support_is_disabled(hass) -> 
 
 async def test_all_opportunities_include_trailer_only_when_available(hass) -> None:
     coordinator = RideRadarDataCoordinator(
-        hass, _entry(trailer_support_enabled=True), FakeApiClient(), FakeRoutingClient()
+        hass, _entry_with_modes(_travel_modes(trailer=True)), FakeApiClient(), FakeRoutingClient()
     )
     coordinator.set_runtime_control("trailer_available", "off")
 
@@ -239,7 +268,10 @@ async def test_evaluation_summary_matches_candidate_rows(hass) -> None:
     assert summary["rejected"] == len([row for row in rows if row["result"] == "rejected"])
     assert summary["unavailable"] == len([row for row in rows if row["result"] == "unavailable"])
     assert summary["recommended"] == 1
-    assert all(row["result"] in {"recommended", "eligible", "compromise", "rejected", "unavailable"} for row in rows)
+    assert all(
+        row["result"] in {"recommended", "eligible", "joker", "compromise", "rejected", "unavailable"}
+        for row in rows
+    )
 
 
 async def test_rejected_and_unavailable_candidates_have_reason_and_evidence(hass) -> None:
@@ -279,3 +311,154 @@ async def test_eligible_candidates_are_not_rejected_when_ranked_below_best(hass)
     assert any(row["result"] == "recommended" for row in rows)
     assert any(row["result"] == "eligible" for row in rows)
     assert not any(row["result"] == "rejected" and (row["total_score"] or 0) >= 70 for row in rows)
+
+
+async def test_disabled_modes_generate_no_candidates_or_rejections(hass) -> None:
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        _entry_with_modes(_travel_modes(direct=True, scenic=False, trailer=False)),
+        FakeApiClient(),
+        FakeRoutingClient(),
+    )
+
+    data = await coordinator._async_update_data()
+    rows = data["evaluated_candidates"]
+    assert {row["mode"] for row in rows} == {"motorcycle_direct"}
+    assert data["mode_status"]["motorcycle_scenic"]["enabled"] is False
+    assert data["mode_status"]["trailer"]["enabled"] is False
+    assert data["evaluation_summary"]["travel_mode_summary"]["motorcycle_scenic"]["rejected"] == 0
+    assert data["evaluation_summary"]["travel_mode_summary"]["trailer"]["rejected"] == 0
+
+
+async def test_candidate_within_normal_limit_exposes_mode_limits(hass) -> None:
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        _entry_with_modes(_travel_modes(direct=True, scenic=False, trailer=False, direct_normal=1.0, direct_joker=1.5)),
+        FakeApiClient(),
+        FakeRoutingClient(),
+    )
+
+    data = await coordinator._async_update_data()
+    row = data["evaluated_candidates"][0]
+
+    assert row["mode"] == "motorcycle_direct"
+    assert row["approach_time_classification"] == "within_normal_limit"
+    assert row["approach_time"]["normal_max"] == "1 uur"
+    assert row["approach_time"]["joker_max"] == "1 uur en 30 minuten"
+    assert row["normal_limit_overrun_minutes"] == 0
+
+
+async def test_exceptional_candidate_between_normal_and_joker_becomes_joker(hass) -> None:
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        _entry_with_modes(
+            _travel_modes(direct=True, scenic=False, trailer=False, direct_normal=0.5, direct_joker=1.0)
+        ),
+        FakeApiClient(),
+        FakeRoutingClient(),
+    )
+
+    data = await coordinator._async_update_data()
+    rows = data["evaluated_candidates"]
+    joker = next(row for row in rows if row["result"] == "joker")
+
+    assert joker["approach_time_classification"] == "within_joker_limit"
+    assert joker["normal_limit_overrun_minutes"] == 15
+    assert data["top_week_direct_opportunities"]["opportunities"] == []
+    assert data["joker_opportunities"]
+
+
+async def test_weak_candidate_between_normal_and_joker_is_compromise_not_joker(hass) -> None:
+    class PoorApiClient:
+        async def get_daily_forecast(self, latitude, longitude, forecast_days):
+            return [
+                DailyForecast("2026-06-04", 10, 90, 4, 35, 45, 70, 61),
+                DailyForecast("2026-06-05", 10, 90, 4, 35, 45, 70, 61),
+                DailyForecast("2026-06-06", 10, 90, 4, 35, 45, 70, 61),
+                DailyForecast("2026-06-07", 10, 90, 4, 35, 45, 70, 61),
+            ][:forecast_days]
+
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        _entry_with_modes(
+            _travel_modes(direct=True, scenic=False, trailer=False, direct_normal=0.5, direct_joker=1.0)
+        ),
+        PoorApiClient(),
+        FakeRoutingClient(),
+    )
+
+    data = await coordinator._async_update_data()
+    rows = data["evaluated_candidates"]
+
+    assert any(row["approach_time_classification"] == "within_joker_limit" for row in rows)
+    assert not any(row["result"] == "joker" for row in rows)
+    assert any(row["result"] == "compromise" for row in rows)
+
+
+async def test_candidate_beyond_joker_limit_is_rejected_with_evidence(hass) -> None:
+    class LongRoutingClient:
+        async def get_route(self, start_latitude, start_longitude, destination, activity_profile):
+            return RouteInfo(160, 90, "fake")
+
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        _entry_with_modes(
+            _travel_modes(direct=True, scenic=False, trailer=False, direct_normal=0.25, direct_joker=0.5)
+        ),
+        FakeApiClient(),
+        LongRoutingClient(),
+    )
+
+    data = await coordinator._async_update_data()
+    rejected = [
+        row
+        for row in data["evaluated_candidates"]
+        if row["result"] == "rejected" and row.get("primary_reason_code") == "joker_approach_time_exceeded"
+        and row.get("approach_time_classification") == "joker_limit_exceeded"
+    ]
+
+    assert rejected
+    assert all(row["approach_time_classification"] == "joker_limit_exceeded" for row in rejected)
+    assert all(row["primary_reason_code"] == "joker_approach_time_exceeded" for row in rejected)
+    evidence = " ".join(" ".join(row["evidence"]) for row in rejected)
+    assert "Jokerlimiet:" in evidence
+    assert "Overschrijding jokerlimiet:" in evidence
+
+
+async def test_same_destination_can_classify_differently_by_travel_mode(hass) -> None:
+    class FallbackRoutingClient:
+        async def get_route(self, start_latitude, start_longitude, destination, activity_profile):
+            return RouteInfo(
+                distance_km=250,
+                travel_time_minutes=180,
+                provider="fallback",
+                direct_distance_km=200,
+                confidence="low",
+                distance_method="haversine_detour",
+                time_method="average_speed_estimate",
+                detour_factor=1.0,
+                assumed_average_speed_kmh=70,
+            )
+
+    modes = _travel_modes(direct=True, scenic=True, trailer=True, direct_normal=3.0, direct_joker=3.5)
+    modes["motorcycle_scenic"]["normal_max_approach_time_hours"] = 2.5
+    modes["motorcycle_scenic"]["joker_max_approach_time_hours"] = 3.0
+    modes["trailer"]["normal_max_approach_time_hours"] = 4.0
+    modes["trailer"]["joker_max_approach_time_hours"] = 5.0
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        _entry_with_modes(modes),
+        FakeApiClient(),
+        FallbackRoutingClient(),
+    )
+
+    data = await coordinator._async_update_data()
+    classifications = {
+        row["mode"]: row["approach_time_classification"]
+        for row in data["evaluated_candidates"]
+        if row["duration_days"] == 2
+    }
+
+    assert classifications["motorcycle_direct"] == "within_normal_limit"
+    assert classifications["motorcycle_scenic"] in {"within_joker_limit", "joker_limit_exceeded"}
+    assert classifications["trailer"] == "within_normal_limit"

@@ -542,6 +542,19 @@ def _format_minutes(minutes: int) -> str:
     return f"{remainder}m"
 
 
+def _format_hours_human(hours: float | None) -> str:
+    """Return a Dutch human-readable duration from decimal hours."""
+    if hours is None:
+        return "n.v.t."
+    total_minutes = int(round(float(hours) * 60))
+    whole_hours, minutes = divmod(total_minutes, 60)
+    if whole_hours and minutes:
+        return f"{whole_hours} uur en {minutes} minuten"
+    if whole_hours:
+        return f"{whole_hours} uur"
+    return f"{minutes} minuten"
+
+
 def _trip_window_attributes(result: DestinationResult, planning_profile: Any = None) -> dict[str, Any] | None:
     window = result.best_trip_window
     if window is None:
@@ -608,6 +621,7 @@ def _window_attributes(result: DestinationResult, window: Any, planning_profile:
         "recommendation_type": experience.recommendation_type if experience else None,
         "travel_strategy": experience.travel_strategy if experience else None,
         "approach_time_hours": experience.approach_time_hours if experience else None,
+        "approach_time_human_readable": _format_hours_human(experience.approach_time_hours) if experience else None,
         "return_time_hours": experience.return_time_hours if experience else None,
         "total_transport_time_hours": experience.total_transport_time_hours if experience else None,
         "total_available_time_hours": experience.total_available_time_hours if experience else None,
@@ -618,6 +632,22 @@ def _window_attributes(result: DestinationResult, window: Any, planning_profile:
         "destination_ride_time_ratio": experience.destination_ride_time_ratio if experience else None,
         "preferred_max_approach_time_hours": experience.preferred_max_approach_time_hours if experience else None,
         "absolute_max_approach_time_hours": experience.absolute_max_approach_time_hours if experience else None,
+        "normal_max_approach_time_hours": experience.normal_max_approach_time_hours if experience else None,
+        "joker_max_approach_time_hours": experience.joker_max_approach_time_hours if experience else None,
+        "normal_limit_overrun_minutes": experience.normal_limit_overrun_minutes if experience else 0,
+        "joker_limit_overrun_minutes": experience.joker_limit_overrun_minutes if experience else 0,
+        "approach_time_classification": experience.approach_time_classification if experience else None,
+        "approach_time": {
+            "hours": experience.approach_time_hours if experience else None,
+            "human_readable": _format_hours_human(experience.approach_time_hours) if experience else None,
+            "normal_max_hours": experience.normal_max_approach_time_hours if experience else None,
+            "joker_max_hours": experience.joker_max_approach_time_hours if experience else None,
+            "normal_max": _format_hours_human(experience.normal_max_approach_time_hours) if experience else None,
+            "joker_max": _format_hours_human(experience.joker_max_approach_time_hours) if experience else None,
+            "classification": experience.approach_time_classification if experience else None,
+            "normal_limit_overrun_minutes": experience.normal_limit_overrun_minutes if experience else 0,
+            "joker_limit_overrun_minutes": experience.joker_limit_overrun_minutes if experience else 0,
+        },
         "preferred_approach_time_overrun_hours": (
             experience.preferred_approach_time_overrun_hours if experience else None
         ),

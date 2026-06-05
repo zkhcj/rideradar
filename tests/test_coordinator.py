@@ -4,7 +4,6 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.rideradar.api import RideRadarApiError
 from custom_components.rideradar.const import (
-    CONF_ABSOLUTE_MAX_APPROACH_TIME_HOURS,
     CONF_ACTIVITY_PROFILE,
     CONF_CUSTOM_TRIP_DURATION_DAYS,
     CONF_DESTINATIONS,
@@ -15,6 +14,7 @@ from custom_components.rideradar.const import (
     CONF_START_ADDRESS,
     CONF_START_LATITUDE,
     CONF_START_LONGITUDE,
+    CONF_TRAVEL_MODES,
     DEFAULT_ACTIVITY_PROFILE,
     DEFAULT_CUSTOM_TRIP_DURATION_DAYS,
     DEFAULT_DETOUR_FACTOR,
@@ -101,6 +101,37 @@ def _entry(destinations=None, max_distance=300, forecast_days=2):
 def _entry_with_options(destinations=None, max_distance=300, forecast_days=2, options=None):
     entry = _entry(destinations=destinations, max_distance=max_distance, forecast_days=forecast_days)
     return MockConfigEntry(domain=entry.domain, data=entry.data, options=options or {})
+
+
+def _travel_modes(
+    *,
+    direct=True,
+    scenic=True,
+    trailer=False,
+    direct_normal=3.0,
+    direct_joker=3.5,
+    scenic_normal=2.5,
+    scenic_joker=3.0,
+    trailer_normal=4.0,
+    trailer_joker=5.0,
+):
+    return {
+        "motorcycle_direct": {
+            "enabled": direct,
+            "normal_max_approach_time_hours": direct_normal,
+            "joker_max_approach_time_hours": direct_joker,
+        },
+        "motorcycle_scenic": {
+            "enabled": scenic,
+            "normal_max_approach_time_hours": scenic_normal,
+            "joker_max_approach_time_hours": scenic_joker,
+        },
+        "trailer": {
+            "enabled": trailer,
+            "normal_max_approach_time_hours": trailer_normal,
+            "joker_max_approach_time_hours": trailer_joker,
+        },
+    }
 
 
 def _forecast_day(day, score_weather=1):
@@ -284,14 +315,10 @@ async def test_coordinator_excludes_trailer_strategy_when_trailer_is_unavailable
 
     data = await coordinator._async_update_data()
 
-    assert data["travel_strategy"] == "trailer"
+    assert data["travel_strategy"] == "motorcycle_direct"
     assert data["trailer_available"] is False
-    assert data["best"] is None
-    assert data["opportunities"] == []
-    assert data["results"][0].ride_quality_score is None
-    assert any(
-        item["reason"] == "trailer_required_but_unavailable" for item in data["excluded_destinations"]
-    )
+    assert data["mode_status"]["trailer"]["enabled"] is False
+    assert "trailer" not in {item["strategy"] for item in data["all_opportunities"]}
 
 
 async def test_coordinator_marks_unreachable_destination_without_fetching_weather(hass) -> None:
@@ -331,7 +358,12 @@ async def test_preferred_approach_time_does_not_reject_harz_like_destination(has
     ]
     coordinator = RideRadarDataCoordinator(
         hass,
-        _entry(destinations=destinations, max_distance=1350, forecast_days=3),
+        _entry_with_options(
+            destinations=destinations,
+            max_distance=1350,
+            forecast_days=3,
+            options={CONF_TRAVEL_MODES: _travel_modes(direct_normal=3.5, direct_joker=5.0, scenic=False)},
+        ),
         FakeApiClient(
             forecasts=[
                 _forecast_day("2026-06-04"),
@@ -346,10 +378,10 @@ async def test_preferred_approach_time_does_not_reject_harz_like_destination(has
 
     data = await coordinator._async_update_data()
 
-    assert data["opportunities"]
+    assert data["all_opportunities"]
     assert data["best"].destination.name == "Harz"
-    assert data["opportunities"][0]["preferred_approach_time_overrun_hours"] > 0
-    assert data["opportunities"][0]["absolute_max_approach_time_hours"] is None
+    assert data["all_opportunities"][0]["normal_limit_overrun_minutes"] > 0
+    assert data["all_opportunities"][0]["approach_time_classification"] == "within_joker_limit"
     assert not any(item["reason"] == "approach_time_too_high" for item in data["excluded_destinations"])
 
 
@@ -368,7 +400,7 @@ async def test_explicit_absolute_approach_limit_rejects_candidate(hass) -> None:
             destinations=destinations,
             max_distance=1350,
             forecast_days=3,
-            options={CONF_ABSOLUTE_MAX_APPROACH_TIME_HOURS: 3.0},
+            options={CONF_TRAVEL_MODES: _travel_modes(direct_normal=2.5, direct_joker=3.0, scenic=False)},
         ),
         api,
         DestinationRoutingClient({"Harz": RouteInfo(365, 260, "test")}),
@@ -377,16 +409,26 @@ async def test_explicit_absolute_approach_limit_rejects_candidate(hass) -> None:
     data = await coordinator._async_update_data()
 
     assert data["opportunities"] == []
-    assert any(item["reason"] == "absolute_approach_time_exceeded" for item in data["excluded_destinations"])
-    assert api.calls == 0
-    assert data["weather"]["weather_fetch_summary"]["destinations_skipped_by_hard_constraint"] == 1
+    rejected = [
+        row
+        for row in data["evaluated_candidates"]
+        if row.get("primary_reason_code") == "joker_approach_time_exceeded"
+        and row.get("approach_time_classification") == "joker_limit_exceeded"
+    ]
+    assert rejected
+    assert api.calls == 1
 
 
 async def test_highest_eligible_candidate_becomes_recommended(hass) -> None:
     destinations = [DestinationArea("Sauerland", "Duitsland", 51.18, 8.25).as_dict()]
     coordinator = RideRadarDataCoordinator(
         hass,
-        _entry(destinations=destinations, max_distance=1350, forecast_days=3),
+        _entry_with_options(
+            destinations=destinations,
+            max_distance=1350,
+            forecast_days=3,
+            options={CONF_TRAVEL_MODES: _travel_modes(direct_normal=9.0, direct_joker=10.0, scenic=False)},
+        ),
         FakeApiClient(
             forecasts=[
                 _forecast_day("2026-06-04"),
@@ -458,7 +500,12 @@ async def test_fallback_routing_metadata_is_exposed_for_vogezen(hass) -> None:
     destinations = [DestinationArea("Vogezen", "Frankrijk", 48.0, 7.0).as_dict()]
     coordinator = RideRadarDataCoordinator(
         hass,
-        _entry(destinations=destinations, max_distance=1350, forecast_days=3),
+        _entry_with_options(
+            destinations=destinations,
+            max_distance=1350,
+            forecast_days=3,
+            options={CONF_TRAVEL_MODES: _travel_modes(direct_normal=9.0, direct_joker=10.0, scenic=False)},
+        ),
         FakeApiClient(
             forecasts=[
                 _forecast_day("2026-06-04"),

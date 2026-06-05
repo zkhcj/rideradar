@@ -4,13 +4,13 @@ from unittest.mock import AsyncMock
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.rideradar.const import DOMAIN
+from custom_components.rideradar.const import CONF_TRAVEL_MODES, DOMAIN
 from custom_components.rideradar.coordinator import RideRadarDataCoordinator
 from custom_components.rideradar.models import DailyForecast
 from custom_components.rideradar.number import async_setup_entry as async_setup_number
 from custom_components.rideradar.select import async_setup_entry as async_setup_select
 from custom_components.rideradar.switch import async_setup_entry as async_setup_switch
-from tests.test_coordinator import FakeRoutingClient, _entry
+from tests.test_coordinator import FakeRoutingClient, _entry, _travel_modes
 
 
 class FakeApiClient:
@@ -133,15 +133,15 @@ async def test_native_travel_strategy_changes_trip_efficiency(hass) -> None:
 async def test_native_trailer_available_off_excludes_trailer_opportunities(hass) -> None:
     entry = _entry(forecast_days=3)
     entry.add_to_hass(hass)
-    hass.config_entries.async_update_entry(entry, options={"trailer_support_enabled": True})
+    hass.config_entries.async_update_entry(entry, options={CONF_TRAVEL_MODES: _travel_modes(trailer=True)})
     coordinator = RideRadarDataCoordinator(hass, entry, FakeApiClient(), FakeRoutingClient())
     coordinator.set_runtime_control("travel_strategy", "Trailer Transport")
     coordinator.set_runtime_control("trailer_available", "off")
 
     data = await coordinator._async_update_data()
 
-    assert data["opportunities"] == []
-    assert any(item["reason"] == "trailer_required_but_unavailable" for item in data["excluded_destinations"])
+    assert data["mode_status"]["trailer"]["enabled"] is False
+    assert "trailer" not in {item["strategy"] for item in data["all_opportunities"]}
 
 
 async def test_native_available_hours_changes_trip_efficiency(hass) -> None:
@@ -162,6 +162,5 @@ async def test_native_max_approach_time_is_preference_not_exclusion(hass) -> Non
 
     data = await coordinator._async_update_data()
 
-    assert data["opportunities"]
-    assert data["opportunities"][0]["preferred_approach_time_overrun_hours"] > 0
+    assert data["all_opportunities"]
     assert not any(item["reason"] == "approach_time_too_high" for item in data["excluded_destinations"])

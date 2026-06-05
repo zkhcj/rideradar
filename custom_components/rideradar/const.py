@@ -31,6 +31,24 @@ CONF_DETOUR_FACTOR: Final = "detour_factor"
 CONF_WEATHER_ENTITY_MAP: Final = "weather_entity_map"
 CONF_PREFERRED_MAX_APPROACH_TIME_HOURS: Final = "preferred_max_approach_time_hours"
 CONF_ABSOLUTE_MAX_APPROACH_TIME_HOURS: Final = "absolute_max_approach_time_hours"
+CONF_TRAVEL_MODES: Final = "travel_modes"
+CONF_MOTORCYCLE_DIRECT_ENABLED: Final = "motorcycle_direct_enabled"
+CONF_MOTORCYCLE_DIRECT_NORMAL_MAX_APPROACH_TIME_HOURS: Final = (
+    "motorcycle_direct_normal_max_approach_time_hours"
+)
+CONF_MOTORCYCLE_DIRECT_JOKER_MAX_APPROACH_TIME_HOURS: Final = (
+    "motorcycle_direct_joker_max_approach_time_hours"
+)
+CONF_MOTORCYCLE_SCENIC_ENABLED: Final = "motorcycle_scenic_enabled"
+CONF_MOTORCYCLE_SCENIC_NORMAL_MAX_APPROACH_TIME_HOURS: Final = (
+    "motorcycle_scenic_normal_max_approach_time_hours"
+)
+CONF_MOTORCYCLE_SCENIC_JOKER_MAX_APPROACH_TIME_HOURS: Final = (
+    "motorcycle_scenic_joker_max_approach_time_hours"
+)
+CONF_TRAILER_AVAILABLE: Final = "trailer_available"
+CONF_TRAILER_NORMAL_MAX_APPROACH_TIME_HOURS: Final = "trailer_normal_max_approach_time_hours"
+CONF_TRAILER_JOKER_MAX_APPROACH_TIME_HOURS: Final = "trailer_joker_max_approach_time_hours"
 
 DEFAULT_FORECAST_DAYS: Final = 8
 DEFAULT_PREFERRED_TRIP_DURATION: Final = "2"
@@ -41,6 +59,23 @@ DEFAULT_TRAVEL_STRATEGY: Final = "motorcycle_direct"
 DEFAULT_AVAILABLE_HOURS_PER_DAY: Final = 8.0
 DEFAULT_MAX_APPROACH_TIME_HOURS: Final = 4.0
 DEFAULT_PREFERRED_MAX_APPROACH_TIME_HOURS: Final = DEFAULT_MAX_APPROACH_TIME_HOURS
+DEFAULT_TRAVEL_MODES: Final = {
+    "motorcycle_direct": {
+        "enabled": True,
+        "normal_max_approach_time_hours": 3.0,
+        "joker_max_approach_time_hours": 3.5,
+    },
+    "motorcycle_scenic": {
+        "enabled": True,
+        "normal_max_approach_time_hours": 2.5,
+        "joker_max_approach_time_hours": 3.0,
+    },
+    "trailer": {
+        "enabled": False,
+        "normal_max_approach_time_hours": 4.0,
+        "joker_max_approach_time_hours": 5.0,
+    },
+}
 DEFAULT_MAX_ROUTE_DISTANCE_KM: Final = 350.0
 DEFAULT_ACTIVITY_PROFILE: Final = "motorcycle"
 SUPPORTED_ACTIVITY_PROFILES: Final = (DEFAULT_ACTIVITY_PROFILE,)

@@ -64,11 +64,21 @@ Current holiday, access, traffic pressure, tourism pressure, and road-fun scorin
 
 RideRadar separates hard constraints from preferences.
 
-Hard constraints are rules that make a candidate impossible or explicitly forbidden. Examples are an explicitly disabled destination, the absolute maximum route distance, unavailable required trailer transport, missing weather data with no fallback, and an explicitly configured `absolute_max_approach_time_hours`.
+Hard constraints are rules that make a candidate impossible or explicitly forbidden. Examples are an explicitly disabled destination, the absolute maximum route distance, missing weather data with no fallback, a disabled travel mode, or an approach time above the configured joker limit for that travel mode.
 
 Preferences influence ranking and compromise labels, but do not reject a candidate by themselves. Examples are preferred trip duration, preferred start day, preferred travel strategy, preferred maximum approach time, preferred weather quality and preferred trip efficiency.
 
-The native dashboard entity `number.rideradar_max_approach_time_hours` is a preferred approach-time target. Existing `max_approach_time_hours` values are treated as `preferred_max_approach_time_hours` for backwards compatibility. They reduce `trip_efficiency_score` when exceeded, but they do not reject Harz, Sauerland or another destination. A hard approach-time rejection only happens when `absolute_max_approach_time_hours` is configured separately.
+Approach-time limits are configured per travel mode in the Home Assistant options flow. Each mode has a normal limit and a joker limit. Candidates inside the normal limit can appear in regular recommendations and Top 3 lists. Candidates above the normal limit but inside the joker limit remain usable only as joker candidates when their score is exceptional enough. Candidates above the joker limit are rejected for that travel mode with evidence showing the actual approach time, normal limit, joker limit and overrun.
+
+Existing `max_approach_time_hours` values migrate safely into the direct-route normal limit, with the direct joker limit initialized 30 minutes higher. Existing trailer state is preserved and trailer transport is never enabled silently for users who had it disabled.
+
+Default travel-mode limits:
+
+| Reisstrategie | Ingeschakeld | Normale limiet | Jokerlimiet |
+| --- | --- | ---: | ---: |
+| Direct / snelweg | yes | 3 hours | 3 hours 30 minutes |
+| Binnendoor / scenic | yes | 2 hours 30 minutes | 3 hours |
+| Aanhanger | no | 4 hours | 5 hours |
 
 Preferred trip duration works the same way. A 3-day preference gives context to ranking and evidence, but a strong 2-day Sauerland ride can still become the recommendation when it is the highest eligible candidate. RideRadar evaluates 2-day through the preferred maximum duration for normal multi-day planning, and 1-day windows only when the selected duration is one day or flexible mode explicitly includes them.
 
@@ -104,7 +114,7 @@ usable_destination_time = total_available_time - total_transport_time
 destination_ride_time_ratio = usable_destination_time / total_available_time
 ```
 
-A four-hour approach can be poor for a one-day ride but acceptable for a three-day or four-day trip. Candidate evidence exposes approach time, return time, transport time, available trip hours, usable destination hours, preferred approach overrun, absolute approach limit and trip-efficiency score.
+A four-hour approach can be poor for a one-day ride but acceptable for a three-day or four-day trip. Candidate evidence exposes approach time, return time, transport time, available trip hours, usable destination hours, normal limit, joker limit, limit overruns and trip-efficiency score.
 
 Fallback routing is clearly marked. When no real routing provider is configured, RideRadar estimates route distance from direct haversine distance, detour factor and a strategy-specific average speed. It exposes `routing_provider: fallback`, `routing_confidence: low`, `routing_distance_method: haversine_detour`, `routing_time_method: average_speed_estimate`, direct distance, estimated route distance, assumed speed and detour factor. A Vogezen approach time such as 8 hours and 48 minutes is therefore shown as a fallback estimate, not a confirmed route.
 
@@ -204,6 +214,7 @@ sections:
         content: |
           {% set candidate = state_attr('sensor.rideradar_evaluation_summary', 'advice_candidate') or {} %}
           {% set candidate = candidate if candidate is mapping else {} %}
+          {% set approach = candidate.get('approach_time', {}) if candidate.get('approach_time', {}) is mapping else {} %}
           {% set result = candidate.get('result') %}
           {% if result == 'recommended' %}
           ## Aanbevolen rit: {{ candidate.get('destination', 'n.b.') }}
@@ -230,7 +241,17 @@ sections:
 
           **Waarom:** {{ candidate.get('supporting_evidence', 'Geen onderbouwing beschikbaar.') }}
 
-          **Aanrijtijd:** {{ candidate.get('approach_time_hours', 'n.b.') }} uur · voorkeur {{ candidate.get('preferred_max_approach_time_hours', 'n.b.') }} uur · absolute limiet {{ candidate.get('absolute_max_approach_time_hours', 'geen') }}
+          **Aanrijtijd:** {{ approach.get('human_readable', candidate.get('approach_time_human_readable', 'n.b.')) }}
+
+          **Normale limiet:** {{ approach.get('normal_max', 'n.v.t.') }} · **Jokerlimiet:** {{ approach.get('joker_max', 'n.v.t.') }}
+
+          {% if candidate.get('approach_time_classification') == 'within_normal_limit' %}
+          Binnen jouw normale limiet voor deze reisstrategie.
+          {% elif candidate.get('approach_time_classification') == 'within_joker_limit' %}
+          {{ candidate.get('normal_limit_overrun_minutes', 0) }} minuten langer dan jouw normale limiet, maar binnen jouw jokerlimiet.
+          {% elif candidate.get('approach_time_classification') == 'joker_limit_exceeded' %}
+          {{ candidate.get('joker_limit_overrun_minutes', 0) }} minuten langer dan jouw jokerlimiet.
+          {% endif %}
 
       - type: markdown
         title: Afwijzingssamenvatting
@@ -271,6 +292,27 @@ sections:
           Nog geen duurvergelijking beschikbaar.
           {% endfor %}
 
+      - type: markdown
+        title: Jokers
+        content: |
+          {% set rows = state_attr('sensor.rideradar_evaluation_summary', 'evaluated_candidates') or [] %}
+          {% set found = namespace(count=0) %}
+          {% for item in rows %}
+          {% set item = item if item is mapping else {} %}
+          {% if item.get('result') == 'joker' %}
+          {% set found.count = found.count + 1 %}
+          **Joker {{ found.count }}:** {{ item.get('destination', 'n.b.') }} · {{ item.get('total_score', 'n.b.') }}/100 · {{ item.get('duration_days', 'n.b.') }} dagen · {{ item.get('mode_label', 'n.b.') }}
+
+          Aanrijtijd: {{ item.get('approach_time_human_readable', 'n.b.') }}. {{ item.get('normal_limit_overrun_minutes', 0) }} minuten langer dan jouw normale limiet, binnen jokerlimiet {{ item.get('approach_time', {}).get('joker_max', 'n.v.t.') if item.get('approach_time', {}) is mapping else 'n.v.t.' }}.
+
+          {{ item.get('supporting_evidence', 'Geen onderbouwing beschikbaar.') }}
+
+          {% endif %}
+          {% endfor %}
+          {% if found.count == 0 %}
+          Geen jokeropties binnen de huidige instellingen.
+          {% endif %}
+
           {% if compromise_counts %}
           Compromisredenen:
           {% for reason, count in compromise_counts.items() %}
@@ -298,7 +340,7 @@ sections:
           {{ options | count }} geldige optie{{ 's' if options | count != 1 else '' }} gevonden.
           {% for item in options[:3] %}
           {% set item = item if item is mapping else {} %}
-          {{ loop.index }}. {{ item.get('destination', 'n.b.') }} · {{ item.get('ride_quality_score', 'n.b.') }}/100 · {{ item.get('period', 'Nog niet beschikbaar') }} · {{ item.get('duration_days', 'n.b.') }} dagen
+          {{ loop.index }}. {{ item.get('destination', 'n.b.') }} · {{ item.get('ride_quality_score', 'n.b.') }}/100 · {{ item.get('period', 'Nog niet beschikbaar') }} · {{ item.get('duration_days', 'n.b.') }} dagen · aanrijtijd {{ item.get('approach_time_human_readable', 'n.b.') }}
           {% endfor %}
           {% elif rejected is mapping %}
           Geen geldige opties. Beste compromis: {{ rejected.get('destination', 'n.b.') }} · {{ rejected.get('ride_quality_score', 'n.b.') }}/100. Reden: {{ rejected.get('main_tradeoff', 'Score blijft onder de adviesdrempel.') }}
@@ -347,6 +389,20 @@ sections:
             name: Beschikbare uren per dag
           - entity: number.rideradar_max_approach_time_hours
             name: Voorkeurs-aanrijtijd
+      - type: markdown
+        title: Reisstrategieen
+        content: |
+          {% set eval = state_attr('sensor.rideradar_evaluation_summary', 'evaluation_summary') or {} %}
+          {% set eval = eval if eval is mapping else {} %}
+          {% set modes = eval.get('travel_mode_summary', {}) if eval.get('travel_mode_summary', {}) is mapping else {} %}
+          | Reisstrategie | Ingeschakeld | Normale limiet | Jokerlimiet | Normaal | Jokers | Afgewezen |
+          |---|---:|---:|---:|---:|---:|---:|
+          {% for mode, info in modes.items() %}
+          {% set info = info if info is mapping else {} %}
+          | {{ info.get('label', mode) }} | {{ 'Ja' if info.get('enabled') else 'Nee' }} | {{ info.get('normal_max_approach_time', 'n.v.t.') }} | {{ info.get('joker_max_approach_time', 'n.v.t.') }} | {{ info.get('normal_candidates', 0) }} | {{ info.get('jokers', 0) }} | {{ info.get('rejected', 0) }} |
+          {% else %}
+          | Geen data | - | - | - | - | - | - |
+          {% endfor %}
       - type: markdown
         title: Debug trace
         content: |
@@ -410,13 +466,14 @@ sections:
         title: Evaluatietabel
         content: |
           {% set rows = state_attr('sensor.rideradar_evaluation_summary', 'evaluated_candidates') or [] %}
-          | Status | Bestemming | Modus | Periode | Dagen | Duurvoorkeur | Score | Weer | Efficiëntie | Aanrijtijd | Routing | Reden | Bewijs | Provider | Forecastlocatie | Cache | Ontbrekend |
-          |---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|---|---|---|---:|---|
+          | Status | Bestemming | Modus | Periode | Dagen | Score | Weer | Efficiëntie | Aanrijtijd | Normaal | Joker | Over normaal | Over joker | Classificatie | Routing | Reden | Bewijs | Provider | Forecastlocatie | Cache | Ontbrekend |
+          |---|---|---|---|---:|---:|---:|---:|---|---|---|---:|---:|---|---|---|---|---|---|---:|---|
           {% for item in rows %}
           {% set item = item if item is mapping else {} %}
-          | {{ item.get('eligibility_result', 'n.b.') }} | {{ item.get('destination', 'n.b.') }} | {{ item.get('mode_label', 'n.v.t.') }} | {{ item.get('period', 'n.b.') }} | {{ item.get('duration_days', 'n.b.') }} | {{ item.get('duration_preference_score', 'n.b.') }} | {{ item.get('total_score', 'n.b.') }} | {{ item.get('weather_score', 'n.b.') }} | {{ item.get('trip_efficiency_score', 'n.b.') }} | {{ item.get('approach_time_hours', 'n.b.') }} u | {{ item.get('routing_summary', item.get('routing_provider', 'n.b.')) }} | {{ item.get('primary_reason', 'n.b.') }} | {{ item.get('supporting_evidence', 'Geen bewijs beschikbaar.') }} | {{ item.get('weather_provider', 'n.b.') }} | {{ item.get('forecast_location', 'n.b.') }} | {{ item.get('cache_age_minutes', 'n.b.') }} min | {{ item.get('missing_data', []) | join(', ') if item.get('missing_data') else '-' }} |
+          {% set approach = item.get('approach_time', {}) if item.get('approach_time', {}) is mapping else {} %}
+          | {{ item.get('eligibility_result', 'n.b.') }} | {{ item.get('destination', 'n.b.') }} | {{ item.get('mode_label', 'n.v.t.') }} | {{ item.get('period', 'n.b.') }} | {{ item.get('duration_days', 'n.b.') }} | {{ item.get('total_score', 'n.b.') }} | {{ item.get('weather_score', 'n.b.') }} | {{ item.get('trip_efficiency_score', 'n.b.') }} | {{ item.get('approach_time_human_readable', approach.get('human_readable', 'n.b.')) }} | {{ approach.get('normal_max', 'n.v.t.') }} | {{ approach.get('joker_max', 'n.v.t.') }} | {{ item.get('normal_limit_overrun_minutes', 0) }} min | {{ item.get('joker_limit_overrun_minutes', 0) }} min | {{ item.get('approach_time_classification', 'n.b.') }} | {{ item.get('routing_summary', item.get('routing_provider', 'n.b.')) }} | {{ item.get('primary_reason', 'n.b.') }} | {{ item.get('supporting_evidence', 'Geen bewijs beschikbaar.') }} | {{ item.get('weather_provider', 'n.b.') }} | {{ item.get('forecast_location', 'n.b.') }} | {{ item.get('cache_age_minutes', 'n.b.') }} min | {{ item.get('missing_data', []) | join(', ') if item.get('missing_data') else '-' }} |
           {% else %}
-          | Geen kandidaten | - | - | - | - | - | - | - | - | - | - | Wachten op data | RideRadar heeft nog geen evaluatie gemaakt. | - | - | - | - |
+          | Geen kandidaten | - | - | - | - | - | - | - | - | - | - | - | - | - | - | Wachten op data | RideRadar heeft nog geen evaluatie gemaakt. | - | - | - | - |
           {% endfor %}
 ```
 
@@ -483,7 +540,9 @@ sections:
           - name: Afstand
             data: opportunities.distance_km
           - name: Aanrijtijd
-            data: opportunities.approach_time_hours
+            data: opportunities.approach_time_human_readable
+          - name: Aanrijklasse
+            data: opportunities.approach_time_classification
           - name: Routing
             data: opportunities.routing_confidence
           - name: Reden
@@ -505,13 +564,13 @@ type: markdown
 title: Alle RideRadar opties
 content: |
   {% set rows = state_attr('sensor.rideradar_all_opportunities', 'opportunities') or [] %}
-  | Score | Bestemming | Strategie | Dagen | Duurvoorkeur | Periode | Weer | Stabiliteit | Efficiëntie | Afstand | Aanrijtijd | Routing |
-  |---:|---|---|---:|---:|---|---:|---:|---:|---:|---:|---|
+  | Score | Bestemming | Strategie | Dagen | Duurvoorkeur | Periode | Weer | Stabiliteit | Efficiëntie | Afstand | Aanrijtijd | Aanrijklasse | Routing |
+  |---:|---|---|---:|---:|---|---:|---:|---:|---:|---|---|---|
   {% for item in rows %}
   {% set item = item if item is mapping else {} %}
-  | {{ item.get('score', 'n.b.') }} | {{ item.get('destination', 'n.b.') }} | {{ item.get('strategy_label', 'n.b.') }} | {{ item.get('duration_days', 'n.b.') }} | {{ item.get('duration_preference_score', 'n.b.') }} | {{ item.get('period', 'n.b.') }} | {{ item.get('weather_score', 'n.b.') }} | {{ item.get('stability_score', 'n.b.') }} | {{ item.get('trip_efficiency_score', 'n.b.') }} | {{ item.get('distance_km', 0) | round(0) }} km | {{ item.get('approach_time_hours', 0) | round(1) }} u | {{ item.get('routing_confidence', 'n.b.') }} |
+  | {{ item.get('score', 'n.b.') }} | {{ item.get('destination', 'n.b.') }} | {{ item.get('strategy_label', 'n.b.') }} | {{ item.get('duration_days', 'n.b.') }} | {{ item.get('duration_preference_score', 'n.b.') }} | {{ item.get('period', 'n.b.') }} | {{ item.get('weather_score', 'n.b.') }} | {{ item.get('stability_score', 'n.b.') }} | {{ item.get('trip_efficiency_score', 'n.b.') }} | {{ item.get('distance_km', 0) | round(0) }} km | {{ item.get('approach_time_human_readable', 'n.b.') }} | {{ item.get('approach_time_classification', 'n.b.') }} | {{ item.get('routing_confidence', 'n.b.') }} |
   {% else %}
-  | - | Nog geen opties beschikbaar | - | - | - | RideRadar wacht op forecast-data of alle kandidaten zijn onder de zichtbare drempel. | - | - | - | - | - | - |
+  | - | Nog geen opties beschikbaar | - | - | - | RideRadar wacht op forecast-data of alle kandidaten zijn onder de zichtbare drempel. | - | - | - | - | - | - | - |
   {% endfor %}
 ```
 
@@ -746,8 +805,16 @@ The options flow shows one normal settings screen with:
 - forecast horizon days
 - destination enablement
 - enabled destinations
+- direct / snelweg enabled
+- direct normal and joker approach-time limits
+- binnendoor / scenic enabled
+- binnendoor normal and joker approach-time limits
+- trailer transport availability
+- trailer normal and joker approach-time limits
 
-Trailer transport support is an advanced option. Dynamic scenario controls such as custom trip duration, flexible duration, weekend-only, preferred start day, travel strategy, trailer availability today, available hours per day, and maximum approach time are native dashboard entities. Coordinates are internal resolved data. Raw destination JSON is not part of the normal setup or options experience; import/export remains an advanced maintenance path only.
+Approach-time limits are personal settings and differ per travel mode. Changing them in Settings > Devices & services > RideRadar > Configure triggers a coordinator refresh and reclassifies candidates without reinstalling or restarting Home Assistant.
+
+Dynamic scenario controls such as custom trip duration, flexible duration, weekend-only, preferred start day, selected travel strategy, available hours per day, and the legacy preferred approach-time control are native dashboard entities. Coordinates are internal resolved data. Raw destination JSON is not part of the normal setup or options experience; import/export remains an advanced maintenance path only.
 
 ## Troubleshooting
 

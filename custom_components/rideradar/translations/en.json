@@ -79,13 +79,22 @@
         }
       },
       "settings": {
-        "title": "Advanced trip settings",
-        "description": "Change advanced defaults, including trailer transport mode. Only enable trailer transport if you really use a car and trailer for motorcycle trips.",
+        "title": "Travel modes and approach times",
+        "description": "Configure which travel modes RideRadar may use and the normal and joker approach-time limits for each mode. The normal limit controls regular recommendations; the joker limit allows exceptional options to remain visible as jokers.",
         "data": {
           "max_route_distance_km": "Maximum route distance",
           "forecast_days": "Forecast horizon days",
           "preferred_trip_duration": "Default trip duration",
-          "trailer_support_enabled": "Enable trailer transport mode"
+          "trailer_support_enabled": "Enable trailer transport mode",
+          "motorcycle_direct_enabled": "Use direct approach route",
+          "motorcycle_direct_normal_max_approach_time_hours": "Normal maximum direct approach time",
+          "motorcycle_direct_joker_max_approach_time_hours": "Maximum direct approach time for a joker",
+          "motorcycle_scenic_enabled": "Use scenic approach route",
+          "motorcycle_scenic_normal_max_approach_time_hours": "Normal maximum scenic approach time",
+          "motorcycle_scenic_joker_max_approach_time_hours": "Maximum scenic approach time for a joker",
+          "trailer_available": "Do you have access to a trailer?",
+          "trailer_normal_max_approach_time_hours": "Normal maximum trailer approach time",
+          "trailer_joker_max_approach_time_hours": "Maximum trailer approach time for a joker"
         }
       },
       "destinations": {
@@ -144,7 +153,10 @@
       "invalid_location_choice": "Choose one of the resolved locations.",
       "invalid_trip_duration": "Trip duration must fit within the available forecast range.",
       "invalid_range": "Maximum route distance must be within the supported range.",
-      "query_too_short": "Enter at least 3 characters."
+      "query_too_short": "Enter at least 3 characters.",
+      "no_travel_mode_enabled": "Enable at least one travel strategy.",
+      "joker_below_normal": "The maximum approach time for a joker must be equal to or longer than the normal maximum approach time.",
+      "invalid_approach_time": "Approach time must be greater than zero."
     },
     "abort": {
       "no_custom_destinations": "There are no custom destinations to remove."

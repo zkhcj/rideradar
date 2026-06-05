@@ -79,13 +79,22 @@
         }
       },
       "settings": {
-        "title": "Geavanceerde ritinstellingen",
-        "description": "Wijzig geavanceerde standaardwaarden, inclusief aanhangertransport. Alleen inschakelen als je echt een auto en aanhanger gebruikt om de motor te vervoeren.",
+        "title": "Reisstrategieen en aanrijtijden",
+        "description": "Stel per reisstrategie in of RideRadar die mag gebruiken en welke normale en joker-aanrijtijd daarbij hoort. De normale limiet bepaalt gewone aanbevelingen; de jokerlimiet laat uitzonderlijk goede opties nog als joker zien.",
         "data": {
           "max_route_distance_km": "Maximale routeafstand",
           "forecast_days": "Voorspellingshorizon in dagen",
           "preferred_trip_duration": "Standaard ritduur",
-          "trailer_support_enabled": "Aanhangertransport inschakelen"
+          "trailer_support_enabled": "Aanhangertransport inschakelen",
+          "motorcycle_direct_enabled": "Directe aanrijroute gebruiken",
+          "motorcycle_direct_normal_max_approach_time_hours": "Normale maximale directe aanrijtijd",
+          "motorcycle_direct_joker_max_approach_time_hours": "Maximale directe aanrijtijd voor een joker",
+          "motorcycle_scenic_enabled": "Binnendoor-aanrijroute gebruiken",
+          "motorcycle_scenic_normal_max_approach_time_hours": "Normale maximale binnendoor-aanrijtijd",
+          "motorcycle_scenic_joker_max_approach_time_hours": "Maximale binnendoor-aanrijtijd voor een joker",
+          "trailer_available": "Heb je beschikking over een aanhanger?",
+          "trailer_normal_max_approach_time_hours": "Normale maximale aanrijtijd met aanhanger",
+          "trailer_joker_max_approach_time_hours": "Maximale aanrijtijd met aanhanger voor een joker"
         }
       },
       "destinations": {
@@ -144,7 +153,10 @@
       "invalid_location_choice": "Kies een van de gevonden locaties.",
       "invalid_trip_duration": "Reisduur moet binnen de beschikbare voorspelling passen.",
       "invalid_range": "Maximale routeafstand moet binnen het ondersteunde bereik liggen.",
-      "query_too_short": "Voer minimaal 3 tekens in."
+      "query_too_short": "Voer minimaal 3 tekens in.",
+      "no_travel_mode_enabled": "Schakel minimaal één reisstrategie in.",
+      "joker_below_normal": "De maximale aanrijtijd voor een joker moet gelijk zijn aan of langer zijn dan de normale maximale aanrijtijd.",
+      "invalid_approach_time": "De aanrijtijd moet groter zijn dan nul."
     },
     "abort": {
       "no_custom_destinations": "Er zijn geen eigen bestemmingen om te verwijderen."

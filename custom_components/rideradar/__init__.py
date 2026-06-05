@@ -17,18 +17,22 @@ from .const import (
     CONF_ENABLED_DEFAULT_DESTINATIONS,
     CONF_FORECAST_DAYS,
     CONF_MAX_ROUTE_DISTANCE_KM,
+    CONF_PREFERRED_MAX_APPROACH_TIME_HOURS,
     CONF_PREFERRED_TRIP_DURATION,
+    CONF_TRAVEL_MODES,
     DEFAULT_ACTIVITY_PROFILE,
     DEFAULT_CUSTOM_TRIP_DURATION_DAYS,
     DEFAULT_DETOUR_FACTOR,
     DEFAULT_FORECAST_DAYS,
     DEFAULT_MAX_ROUTE_DISTANCE_KM,
+    DEFAULT_PREFERRED_MAX_APPROACH_TIME_HOURS,
     DEFAULT_PREFERRED_TRIP_DURATION,
     DOMAIN,
     PLATFORMS,
 )
 from .coordinator import RideRadarDataCoordinator
 from .destinations import DEFAULT_DESTINATIONS, default_destination_names, parse_destinations_data
+from .travel_modes import flat_travel_mode_options
 
 SERVICE_REFRESH_WEATHER = "refresh_weather"
 
@@ -86,10 +90,11 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate legacy raw destination JSON config to structured destination data."""
-    if entry.version >= 3 and CONF_DESTINATIONS not in entry.data:
+    if entry.version >= 4 and CONF_DESTINATIONS not in entry.data:
         return True
 
     data = dict(entry.data)
+    options = dict(entry.options)
     default_names = set(default_destination_names())
     legacy_value = data.pop(CONF_DESTINATIONS, None)
     if legacy_value is not None:
@@ -115,5 +120,20 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data.setdefault(CONF_CUSTOM_TRIP_DURATION_DAYS, DEFAULT_CUSTOM_TRIP_DURATION_DAYS)
     data.setdefault(CONF_ACTIVITY_PROFILE, DEFAULT_ACTIVITY_PROFILE)
     data.setdefault(CONF_DETOUR_FACTOR, DEFAULT_DETOUR_FACTOR)
-    hass.config_entries.async_update_entry(entry, data=data, version=3)
+    merged = {**data, **options}
+    if CONF_TRAVEL_MODES not in options:
+        try:
+            preferred_approach = float(
+                merged.get(CONF_PREFERRED_MAX_APPROACH_TIME_HOURS, DEFAULT_PREFERRED_MAX_APPROACH_TIME_HOURS)
+            )
+        except (TypeError, ValueError):
+            preferred_approach = DEFAULT_PREFERRED_MAX_APPROACH_TIME_HOURS
+        options.update(flat_travel_mode_options({
+            **merged,
+            "motorcycle_direct_normal_max_approach_time_hours": preferred_approach,
+            "motorcycle_direct_joker_max_approach_time_hours": preferred_approach + 0.5,
+        }))
+    else:
+        options.update(flat_travel_mode_options({**merged, **options}))
+    hass.config_entries.async_update_entry(entry, data=data, options=options, version=4)
     return True

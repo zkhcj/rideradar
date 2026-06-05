@@ -31,10 +31,19 @@ from .const import (
     CONF_ENABLED_DEFAULT_DESTINATIONS,
     CONF_FORECAST_DAYS,
     CONF_MAX_ROUTE_DISTANCE_KM,
+    CONF_MOTORCYCLE_DIRECT_ENABLED,
+    CONF_MOTORCYCLE_DIRECT_JOKER_MAX_APPROACH_TIME_HOURS,
+    CONF_MOTORCYCLE_DIRECT_NORMAL_MAX_APPROACH_TIME_HOURS,
+    CONF_MOTORCYCLE_SCENIC_ENABLED,
+    CONF_MOTORCYCLE_SCENIC_JOKER_MAX_APPROACH_TIME_HOURS,
+    CONF_MOTORCYCLE_SCENIC_NORMAL_MAX_APPROACH_TIME_HOURS,
     CONF_PREFERRED_TRIP_DURATION,
     CONF_START_ADDRESS,
     CONF_START_LATITUDE,
     CONF_START_LONGITUDE,
+    CONF_TRAILER_AVAILABLE,
+    CONF_TRAILER_JOKER_MAX_APPROACH_TIME_HOURS,
+    CONF_TRAILER_NORMAL_MAX_APPROACH_TIME_HOURS,
     CONF_TRAILER_SUPPORT_ENABLED,
     DEFAULT_ACTIVITY_PROFILE,
     DEFAULT_CUSTOM_TRIP_DURATION_DAYS,
@@ -69,6 +78,7 @@ from .destinations import (
 )
 from .geocoding import GeocodingError, LocationResult, OpenMeteoGeocodingClient
 from .models import DestinationArea, RideRadarConfigError
+from .travel_modes import flat_travel_mode_options, travel_mode_options_from_input, travel_mode_validation_errors
 
 FIELD_ADDRESS = "address"
 FIELD_LOCATION = "location"
@@ -83,7 +93,7 @@ FIELD_IMPORT_EXPORT_JSON = "destinations_json"
 class RideRadarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle RideRadar config flow."""
 
-    VERSION = 3
+    VERSION = 4
 
     def __init__(self) -> None:
         self._data: dict[str, Any] = {}
@@ -210,12 +220,15 @@ class RideRadarOptionsFlow(config_entries.OptionsFlow):
         errors: dict[str, str] = {}
         if user_input is not None:
             errors = _settings_errors(user_input)
+            if not errors:
+                errors = travel_mode_validation_errors(user_input)
             query = str(user_input.get(CONF_START_ADDRESS, "")).strip()
             if len(query) < MIN_GEOCODE_QUERY_LENGTH:
                 errors[CONF_START_ADDRESS] = "query_too_short"
             if not errors:
                 self._pending_options = {
                     **_normalized_settings(user_input),
+                    **travel_mode_options_from_input(user_input),
                     **_destination_options_from_selection(self._config, user_input[FIELD_ENABLED_DESTINATIONS]),
                 }
                 if query != str(self._config.get(CONF_START_ADDRESS, "")).strip():
@@ -329,10 +342,22 @@ class RideRadarOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             errors = _settings_errors(user_input)
             if not errors:
-                return self._save_options(_normalized_settings(user_input))
+                errors = travel_mode_validation_errors(user_input)
+            if not errors:
+                return self._save_options(
+                    {
+                        **_normalized_settings(user_input),
+                        **travel_mode_options_from_input(user_input),
+                    }
+                )
         return self.async_show_form(
             step_id="settings",
-            data_schema=_settings_schema(self._config, include_destinations=False, include_trailer=True),
+            data_schema=_settings_schema(
+                self._config,
+                include_destinations=False,
+                include_trailer=False,
+                include_travel_modes=True,
+            ),
             errors=errors,
         )
 
@@ -546,6 +571,7 @@ def _settings_schema(
     defaults: dict[str, Any],
     include_destinations: bool = True,
     include_trailer: bool = False,
+    include_travel_modes: bool = False,
 ) -> vol.Schema:
     schema: dict[Any, Any] = {
         vol.Required(
@@ -587,6 +613,9 @@ def _settings_schema(
                 default=defaults.get(CONF_TRAILER_SUPPORT_ENABLED, DEFAULT_TRAILER_SUPPORT_ENABLED),
             )
         ] = BooleanSelector()
+    if include_travel_modes:
+        mode_defaults = flat_travel_mode_options(defaults)
+        schema.update(_travel_mode_schema_fields(mode_defaults))
     if include_destinations:
         schema[
             vol.Required(
@@ -605,7 +634,9 @@ def _settings_schema(
 
 
 def _normal_options_schema(defaults: dict[str, Any]) -> vol.Schema:
-    schema = dict(_settings_schema(defaults, include_destinations=False, include_trailer=False).schema)
+    schema = dict(
+        _settings_schema(defaults, include_destinations=False, include_trailer=False, include_travel_modes=True).schema
+    )
     return vol.Schema(
         {
             vol.Required(CONF_START_ADDRESS, default=defaults.get(CONF_START_ADDRESS, "")): TextSelector(
@@ -617,6 +648,53 @@ def _normal_options_schema(defaults: dict[str, Any]) -> vol.Schema:
             ),
         }
     )
+
+
+def _travel_mode_schema_fields(defaults: dict[str, Any]) -> dict[Any, Any]:
+    number = NumberSelector(
+        NumberSelectorConfig(
+            mode=NumberSelectorMode.BOX,
+            min=0.5,
+            max=12,
+            step=0.25,
+            unit_of_measurement="hours",
+        )
+    )
+    return {
+        vol.Required(
+            CONF_MOTORCYCLE_DIRECT_ENABLED,
+            default=defaults[CONF_MOTORCYCLE_DIRECT_ENABLED],
+        ): BooleanSelector(),
+        vol.Required(
+            CONF_MOTORCYCLE_DIRECT_NORMAL_MAX_APPROACH_TIME_HOURS,
+            default=defaults[CONF_MOTORCYCLE_DIRECT_NORMAL_MAX_APPROACH_TIME_HOURS],
+        ): number,
+        vol.Required(
+            CONF_MOTORCYCLE_DIRECT_JOKER_MAX_APPROACH_TIME_HOURS,
+            default=defaults[CONF_MOTORCYCLE_DIRECT_JOKER_MAX_APPROACH_TIME_HOURS],
+        ): number,
+        vol.Required(
+            CONF_MOTORCYCLE_SCENIC_ENABLED,
+            default=defaults[CONF_MOTORCYCLE_SCENIC_ENABLED],
+        ): BooleanSelector(),
+        vol.Required(
+            CONF_MOTORCYCLE_SCENIC_NORMAL_MAX_APPROACH_TIME_HOURS,
+            default=defaults[CONF_MOTORCYCLE_SCENIC_NORMAL_MAX_APPROACH_TIME_HOURS],
+        ): number,
+        vol.Required(
+            CONF_MOTORCYCLE_SCENIC_JOKER_MAX_APPROACH_TIME_HOURS,
+            default=defaults[CONF_MOTORCYCLE_SCENIC_JOKER_MAX_APPROACH_TIME_HOURS],
+        ): number,
+        vol.Required(CONF_TRAILER_AVAILABLE, default=defaults[CONF_TRAILER_AVAILABLE]): BooleanSelector(),
+        vol.Required(
+            CONF_TRAILER_NORMAL_MAX_APPROACH_TIME_HOURS,
+            default=defaults[CONF_TRAILER_NORMAL_MAX_APPROACH_TIME_HOURS],
+        ): number,
+        vol.Required(
+            CONF_TRAILER_JOKER_MAX_APPROACH_TIME_HOURS,
+            default=defaults[CONF_TRAILER_JOKER_MAX_APPROACH_TIME_HOURS],
+        ): number,
+    }
 
 
 def _destination_options_from_selection(config: dict[str, Any], selected_values: list[str]) -> dict[str, Any]:
@@ -685,7 +763,7 @@ def _settings_errors(data: dict[str, Any]) -> dict[str, str]:
 
 
 def _normalized_settings(data: dict[str, Any]) -> dict[str, Any]:
-    return {
+    settings = {
         CONF_MAX_ROUTE_DISTANCE_KM: float(data[CONF_MAX_ROUTE_DISTANCE_KM]),
         CONF_FORECAST_DAYS: int(data[CONF_FORECAST_DAYS]),
         CONF_PREFERRED_TRIP_DURATION: str(data[CONF_PREFERRED_TRIP_DURATION]),
@@ -694,10 +772,12 @@ def _normalized_settings(data: dict[str, Any]) -> dict[str, Any]:
         ),
         CONF_ACTIVITY_PROFILE: str(data.get(CONF_ACTIVITY_PROFILE, DEFAULT_ACTIVITY_PROFILE)),
         CONF_DETOUR_FACTOR: float(data.get(CONF_DETOUR_FACTOR, DEFAULT_DETOUR_FACTOR)),
-        CONF_TRAILER_SUPPORT_ENABLED: bool(
-            data.get(CONF_TRAILER_SUPPORT_ENABLED, DEFAULT_TRAILER_SUPPORT_ENABLED)
-        ),
     }
+    if CONF_TRAILER_SUPPORT_ENABLED in data:
+        settings[CONF_TRAILER_SUPPORT_ENABLED] = bool(
+            data.get(CONF_TRAILER_SUPPORT_ENABLED, DEFAULT_TRAILER_SUPPORT_ENABLED)
+        )
+    return settings
 
 
 def _start_location_options(result: LocationResult) -> dict[str, Any]:

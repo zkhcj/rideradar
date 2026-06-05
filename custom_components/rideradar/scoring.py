@@ -61,6 +61,9 @@ class TripPlanningProfile:
     preferred_max_approach_time_hours: float | None = None
     absolute_max_approach_time_hours: float | None = None
     preferred_duration_days: int | None = None
+    normal_max_approach_time_hours: float | None = None
+    joker_max_approach_time_hours: float | None = None
+    travel_modes: dict[str, dict[str, object]] | None = None
     trailer_support_enabled: bool = False
     trailer_available: bool = False
 
@@ -361,6 +364,11 @@ def calculate_ride_experience(
         absolute_max_approach_time_hours=trip_efficiency["absolute_max_approach_time_hours"],
         preferred_approach_time_overrun_hours=float(trip_efficiency["preferred_approach_time_overrun_hours"]),
         absolute_approach_time_overrun_hours=float(trip_efficiency["absolute_approach_time_overrun_hours"]),
+        normal_max_approach_time_hours=trip_efficiency["normal_max_approach_time_hours"],
+        joker_max_approach_time_hours=trip_efficiency["joker_max_approach_time_hours"],
+        normal_limit_overrun_minutes=int(trip_efficiency["normal_limit_overrun_minutes"]),
+        joker_limit_overrun_minutes=int(trip_efficiency["joker_limit_overrun_minutes"]),
+        approach_time_classification=str(trip_efficiency["approach_time_classification"]),
         preference_warnings=list(trip_efficiency["preference_warnings"]),
         hard_exclusion_reasons=list(trip_efficiency["hard_exclusion_reasons"]),
         score_weights=dict(RIDE_QUALITY_WEIGHTS),
@@ -456,13 +464,29 @@ def calculate_trip_efficiency(
         if planning_profile.preferred_max_approach_time_hours is not None
         else planning_profile.max_approach_time_hours
     )
-    absolute_limit = planning_profile.absolute_max_approach_time_hours
+    normal_limit = planning_profile.normal_max_approach_time_hours or preferred_limit
+    joker_limit = (
+        planning_profile.joker_max_approach_time_hours
+        or planning_profile.absolute_max_approach_time_hours
+        or ((normal_limit + 0.5) if normal_limit is not None else None)
+    )
+    absolute_limit = joker_limit
     preferred_overrun = max(0.0, approach_time_hours - preferred_limit) if preferred_limit else 0.0
     absolute_overrun = max(0.0, approach_time_hours - absolute_limit) if absolute_limit else 0.0
+    normal_overrun = max(0.0, approach_time_hours - normal_limit) if normal_limit else 0.0
+    joker_overrun = max(0.0, approach_time_hours - joker_limit) if joker_limit else 0.0
+    if normal_limit is not None and approach_time_hours <= normal_limit:
+        approach_classification = "within_normal_limit"
+    elif joker_limit is not None and approach_time_hours <= joker_limit:
+        approach_classification = "within_joker_limit"
+    else:
+        approach_classification = "joker_limit_exceeded"
     if preferred_overrun > 0:
         preference_warnings.append("Aanrijtijd overschrijdt de voorkeurswaarde.")
-    if absolute_limit is not None and approach_time_hours > absolute_limit:
-        hard_exclusion_reasons.append("Absolute max approach time exceeded.")
+    if approach_classification == "within_joker_limit":
+        preference_warnings.append("Aanrijtijd valt buiten de normale limiet, maar binnen de jokerlimiet.")
+    if approach_classification == "joker_limit_exceeded":
+        hard_exclusion_reasons.append("Joker max approach time exceeded.")
 
     return_time_hours = approach_time_hours
     total_available_time_hours = max(1.0, planning_profile.available_hours_per_day * window.duration_days)
@@ -501,8 +525,13 @@ def calculate_trip_efficiency(
         "trip_efficiency_score": score,
         "preferred_max_approach_time_hours": round(preferred_limit, 2) if preferred_limit else None,
         "absolute_max_approach_time_hours": round(absolute_limit, 2) if absolute_limit is not None else None,
+        "normal_max_approach_time_hours": round(normal_limit, 2) if normal_limit is not None else None,
+        "joker_max_approach_time_hours": round(joker_limit, 2) if joker_limit is not None else None,
         "preferred_approach_time_overrun_hours": round(preferred_overrun, 2),
         "absolute_approach_time_overrun_hours": round(absolute_overrun, 2),
+        "normal_limit_overrun_minutes": round(normal_overrun * 60),
+        "joker_limit_overrun_minutes": round(joker_overrun * 60),
+        "approach_time_classification": approach_classification,
         "preference_warnings": preference_warnings,
         "hard_exclusion_reasons": hard_exclusion_reasons,
         "exclusion_reasons": hard_exclusion_reasons,
