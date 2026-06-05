@@ -130,7 +130,7 @@ async def test_native_travel_strategy_changes_trip_efficiency(hass) -> None:
     assert direct["opportunities"][0]["trip_efficiency_score"] != scenic["opportunities"][0]["trip_efficiency_score"]
 
 
-async def test_native_trailer_available_off_excludes_trailer_opportunities(hass) -> None:
+async def test_legacy_trailer_runtime_switch_does_not_override_canonical_mode(hass) -> None:
     entry = _entry(forecast_days=3)
     entry.add_to_hass(hass)
     hass.config_entries.async_update_entry(entry, options={CONF_TRAVEL_MODES: _travel_modes(trailer=True)})
@@ -140,8 +140,8 @@ async def test_native_trailer_available_off_excludes_trailer_opportunities(hass)
 
     data = await coordinator._async_update_data()
 
-    assert data["mode_status"]["trailer"]["enabled"] is False
-    assert "trailer" not in {item["strategy"] for item in data["all_opportunities"]}
+    assert data["mode_status"]["trailer"]["enabled"] is True
+    assert "trailer" in {item["strategy"] for item in data["all_opportunities"]}
 
 
 async def test_native_available_hours_changes_trip_efficiency(hass) -> None:
@@ -156,11 +156,18 @@ async def test_native_available_hours_changes_trip_efficiency(hass) -> None:
     ]
 
 
-async def test_native_max_approach_time_is_preference_not_exclusion(hass) -> None:
+async def test_legacy_max_approach_time_control_does_not_override_mode_limits(hass) -> None:
     coordinator = RideRadarDataCoordinator(hass, _entry(forecast_days=3), FakeApiClient(), FakeRoutingClient())
     coordinator.set_runtime_control("max_approach_time_hours", "0.5")
 
     data = await coordinator._async_update_data()
 
     assert data["all_opportunities"]
+    limits_by_mode = {
+        opportunity["strategy"]: opportunity["normal_max_approach_time_hours"]
+        for opportunity in data["all_opportunities"]
+    }
+    assert limits_by_mode["motorcycle_direct"] == 3.0
+    assert limits_by_mode["motorcycle_scenic"] == 2.5
+    assert 0.5 not in limits_by_mode.values()
     assert not any(item["reason"] == "approach_time_too_high" for item in data["excluded_destinations"])

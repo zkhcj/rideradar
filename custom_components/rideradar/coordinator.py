@@ -13,18 +13,15 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import OpenMeteoClient
 from .const import (
-    CONF_ABSOLUTE_MAX_APPROACH_TIME_HOURS,
     CONF_ACTIVITY_PROFILE,
     CONF_CUSTOM_TRIP_DURATION_DAYS,
     CONF_DETOUR_FACTOR,
     CONF_DURATION_MODE,
     CONF_FORECAST_DAYS,
     CONF_MAX_ROUTE_DISTANCE_KM,
-    CONF_PREFERRED_MAX_APPROACH_TIME_HOURS,
     CONF_PREFERRED_TRIP_DURATION,
     CONF_START_LATITUDE,
     CONF_START_LONGITUDE,
-    CONF_TRAILER_SUPPORT_ENABLED,
     CONF_WEATHER_ENTITY_MAP,
     CONTROL_AVAILABLE_HOURS_PER_DAY,
     CONTROL_FORECAST_HORIZON_DAYS,
@@ -45,7 +42,6 @@ from .const import (
     DEFAULT_MAX_ROUTE_DISTANCE_KM,
     DEFAULT_PREFERRED_MAX_APPROACH_TIME_HOURS,
     DEFAULT_PREFERRED_TRIP_DURATION,
-    DEFAULT_TRAILER_SUPPORT_ENABLED,
     DEFAULT_TRAVEL_MODES,
     DEFAULT_TRAVEL_STRATEGY,
     DOMAIN,
@@ -407,8 +403,9 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 active_helpers,
             )
         )
+        mode_status = _mode_status(planning_profile)
         visible_all_opportunities = _table_opportunities(all_opportunities)
-        strategy_top_opportunities = _strategy_top_opportunity_data(all_opportunities)
+        strategy_top_opportunities = _strategy_top_opportunity_data(all_opportunities, mode_status)
         top_week = _top_opportunities(opportunities, max_days_until=COMING_WEEK_DAYS)
         top_month = _top_opportunities(opportunities)
         joker_opportunities = _joker_opportunities(all_opportunities)
@@ -417,7 +414,6 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         excluded_destinations = _excluded_destinations(results) + disabled_destinations
         evaluated_candidates = _evaluated_candidates(opportunities, all_opportunities, excluded_destinations)
         evaluation_summary = _evaluation_summary(evaluated_candidates)
-        mode_status = _mode_status(planning_profile)
         evaluation_summary["disabled_modes"] = _disabled_modes_from_status(mode_status)
         evaluation_summary["duration_summary"] = _duration_summary(evaluated_candidates)
         evaluation_summary["travel_mode_summary"] = _travel_mode_summary(evaluated_candidates, mode_status)
@@ -879,8 +875,8 @@ def _profile_for_mode(planning_profile: TripPlanningProfile, mode: str) -> TripP
         travel_strategy=mode,
         available_hours_per_day=planning_profile.available_hours_per_day,
         max_approach_time_hours=float(mode_config["normal_max_approach_time_hours"]),
-        preferred_max_approach_time_hours=float(mode_config["normal_max_approach_time_hours"]),
-        absolute_max_approach_time_hours=float(mode_config["joker_max_approach_time_hours"]),
+        preferred_max_approach_time_hours=None,
+        absolute_max_approach_time_hours=None,
         normal_max_approach_time_hours=float(mode_config["normal_max_approach_time_hours"]),
         joker_max_approach_time_hours=float(mode_config["joker_max_approach_time_hours"]),
         travel_modes=planning_profile.travel_modes,
@@ -932,6 +928,7 @@ def _compact_table_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
         "verdict": opportunity["verdict"],
         "main_reason": opportunity["main_reason"],
         "main_tradeoff": opportunity["main_tradeoff"],
+        "concise_reason": _concise_candidate_reason(opportunity, "eligible"),
         "weather_status": opportunity.get("weather_status"),
         "weather_provider_used": opportunity.get("weather_provider_used"),
         "forecast_location_name": opportunity.get("forecast_location_name"),
@@ -1386,12 +1383,16 @@ def _empty_strategy_top_data() -> dict[str, dict[str, Any]]:
     }
 
 
-def _strategy_top_opportunity_data(opportunities: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def _strategy_top_opportunity_data(
+    opportunities: list[dict[str, Any]],
+    mode_status: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
     return {
         key: _strategy_top_opportunities(
             opportunities,
             strategy=strategy,
             max_days_until=max_days_until,
+            mode_status=mode_status.get(strategy),
         )
         for key, strategy, max_days_until in TOP_STRATEGY_OPPORTUNITY_KEYS
     }
@@ -1403,29 +1404,79 @@ def _strategy_top_opportunities(
     max_days_until: int | None = None,
     minimum_score: int = 70,
     limit: int = 3,
+    mode_status: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    candidates = [
+    if mode_status is not None and not mode_status.get("enabled", False):
+        return {
+            "opportunities": [],
+            "candidate_count": 0,
+            "normal_candidate_count": 0,
+            "rejected_count": 0,
+            "best_rejected_candidate": None,
+            "empty_reason": str(mode_status.get("reason") or f"{_strategy_label(strategy)} staat uit."),
+        }
+    all_candidates = [
         opportunity
         for opportunity in opportunities
         if opportunity.get("strategy") == strategy
-        and opportunity.get("approach_time_classification") == "within_normal_limit"
         and (
             max_days_until is None
             or (opportunity.get("days_until") is not None and opportunity["days_until"] <= max_days_until)
         )
+    ]
+    candidates = [
+        opportunity
+        for opportunity in all_candidates
+        if opportunity.get("approach_time_classification") == "within_normal_limit"
     ]
     accepted = [
         _compact_strategy_opportunity(opportunity)
         for opportunity in candidates
         if int(opportunity["ride_quality_score"]) >= minimum_score
     ][:limit]
-    rejected = [opportunity for opportunity in candidates if int(opportunity["ride_quality_score"]) < minimum_score]
+    rejected = [
+        opportunity
+        for opportunity in all_candidates
+        if opportunity not in candidates or int(opportunity["ride_quality_score"]) < minimum_score
+    ]
+    best_failed = rejected[0] if rejected else None
     return {
         "opportunities": accepted,
-        "candidate_count": len(candidates),
+        "candidate_count": len(all_candidates),
+        "normal_candidate_count": len(candidates),
         "rejected_count": len(rejected),
-        "best_rejected_candidate": _strategy_rejection_summary(rejected[0]) if rejected else None,
+        "best_rejected_candidate": _strategy_rejection_summary(best_failed) if best_failed else None,
+        "empty_reason": None if accepted else _empty_strategy_reason(strategy, all_candidates, best_failed),
     }
+
+
+def _empty_strategy_reason(
+    strategy: str,
+    candidates: list[dict[str, Any]],
+    best_failed: dict[str, Any] | None,
+) -> str:
+    """Return compact Dutch evidence for an empty strategy section."""
+    label = _strategy_label(strategy).casefold()
+    if not candidates:
+        return f"Geen {label}-kandidaten beoordeeld binnen deze periode."
+    if best_failed is None:
+        return f"Geen {label}-opties boven de adviesdrempel gevonden."
+    if best_failed.get("approach_time_classification") == "joker_limit_exceeded":
+        return (
+            f"Geen {label}-opties binnen jouw jokerlimiet. Beste afgewezen optie: "
+            f"{best_failed.get('destination')} met aanrijtijd {best_failed.get('approach_time_human_readable')} "
+            f"en jokerlimiet {_format_hours_human(best_failed.get('joker_max_approach_time_hours'))}."
+        )
+    if best_failed.get("approach_time_classification") == "within_joker_limit":
+        return (
+            f"Geen normale {label}-opties. Beste joker/compromis: {best_failed.get('destination')} "
+            f"met {best_failed.get('ride_quality_score')}/100 en aanrijtijd "
+            f"{best_failed.get('approach_time_human_readable')}."
+        )
+    return (
+        f"Geen {label}-opties boven 70. Beste optie: {best_failed.get('destination')} "
+        f"met {best_failed.get('ride_quality_score')}/100."
+    )
 
 
 def _compact_strategy_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
@@ -1448,6 +1499,7 @@ def _compact_strategy_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]
         "joker_limit_overrun_minutes": opportunity.get("joker_limit_overrun_minutes"),
         "main_reason": opportunity["main_reason"],
         "main_tradeoff": opportunity["main_tradeoff"],
+        "concise_reason": _concise_candidate_reason(opportunity, "compromise"),
         "weather_status": opportunity.get("weather_status"),
         "weather_provider_used": opportunity.get("weather_provider_used"),
         "forecast_location_name": opportunity.get("forecast_location_name"),
@@ -1607,6 +1659,7 @@ def _candidate_from_opportunity(opportunity: dict[str, Any], result: str) -> dic
         "eligibility_result": _candidate_result_label(result),
         "primary_reason_code": reason_code,
         "primary_reason": primary_reason,
+        "concise_reason": _concise_candidate_reason(opportunity, result),
         "evidence": evidence,
         "supporting_evidence": "; ".join(evidence),
         "secondary_reasons": opportunity.get("tradeoffs", []),
@@ -1692,8 +1745,6 @@ def _opportunity_evidence(opportunity: dict[str, Any], result: str) -> list[str]
     weather = opportunity.get("weather_score")
     duration = opportunity.get("duration_days")
     approach = opportunity.get("approach_time_hours")
-    preferred_approach = opportunity.get("preferred_max_approach_time_hours")
-    absolute_approach = opportunity.get("absolute_max_approach_time_hours")
     evidence = [
         f"Totaalscore {score}/100; adviesdrempel 70.",
         f"Weerscore {weather}/100.",
@@ -1715,14 +1766,6 @@ def _opportunity_evidence(opportunity: dict[str, Any], result: str) -> list[str]
             evidence.append(f"Overschrijding normale limiet: {opportunity['normal_limit_overrun_minutes']} minuten.")
         if opportunity.get("joker_limit_overrun_minutes", 0):
             evidence.append(f"Overschrijding jokerlimiet: {opportunity['joker_limit_overrun_minutes']} minuten.")
-        if preferred_approach is not None:
-            evidence.append(f"Voorkeurs-aanrijtijd: {_format_hours_human(float(preferred_approach))}.")
-        else:
-            evidence.append("Geen aanrijtijdvoorkeur ingesteld.")
-    if absolute_approach is not None:
-        evidence.append(f"Absolute aanrijlimiet {float(absolute_approach):.1f} uur.")
-    else:
-        evidence.append("Geen absolute aanrijlimiet ingesteld.")
     if result == "recommended":
         evidence.insert(0, "Hoogst gerangschikte geschikte kandidaat binnen de actieve instellingen.")
     elif result == "eligible":
@@ -1730,6 +1773,41 @@ def _opportunity_evidence(opportunity: dict[str, Any], result: str) -> list[str]
     else:
         evidence.insert(0, "Bruikbaar compromis, maar onder de adviesdrempel.")
     return evidence
+
+
+def _concise_candidate_reason(opportunity: dict[str, Any], result: str) -> str:
+    """Return rider-facing Dutch prose for the default dashboard."""
+    destination = str(opportunity.get("destination") or "Deze bestemming")
+    mode_label = str(opportunity.get("strategy_label") or "de gekozen reisstrategie").casefold()
+    weather = opportunity.get("weather_score")
+    duration = opportunity.get("duration_days")
+    preferred_duration = opportunity.get("preferred_duration_days")
+    classification = opportunity.get("approach_time_classification")
+    approach = opportunity.get("approach_time_human_readable") or _format_hours_human(
+        opportunity.get("approach_time_hours")
+    )
+    normal_limit = _format_hours_human(opportunity.get("normal_max_approach_time_hours"))
+    joker_limit = _format_hours_human(opportunity.get("joker_max_approach_time_hours"))
+
+    if result == "recommended":
+        first = f"{destination} is de beste beschikbare optie binnen jouw {mode_label}-instellingen."
+    elif result == "joker":
+        first = f"{destination} is een joker: sterk genoeg, maar buiten jouw normale aanrijlimiet."
+    elif result == "compromise":
+        first = f"{destination} is het beste compromis binnen de huidige instellingen."
+    else:
+        first = f"{destination} is bruikbaar, maar er staat een betere optie hoger."
+
+    parts = [first, f"De aanrijtijd is {approach}; normale limiet {normal_limit}, jokerlimiet {joker_limit}."]
+    if weather is not None:
+        parts.append(f"De weerscore is {weather}/100.")
+    if preferred_duration is not None and preferred_duration != duration:
+        parts.append(f"De rit duurt {duration} dagen, terwijl jouw voorkeur {preferred_duration} dagen is.")
+    if classification == "within_normal_limit":
+        parts.append("Deze optie valt binnen de normale aanrijlimiet.")
+    elif classification == "within_joker_limit":
+        parts.append("Deze optie valt buiten de normale limiet, maar nog binnen de jokerlimiet.")
+    return " ".join(parts)
 
 
 def _evaluation_summary(candidates: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1812,9 +1890,9 @@ def _duration_summary(candidates: list[dict[str, Any]]) -> dict[int, dict[str, A
                 "duration_days": duration,
                 "result": result,
                 "reason": candidate.get("primary_reason"),
-                "evidence": candidate.get("supporting_evidence"),
+                "evidence": candidate.get("concise_reason") or candidate.get("primary_reason"),
             }
-            bucket["main_reason"] = candidate.get("supporting_evidence")
+            bucket["main_reason"] = candidate.get("concise_reason") or candidate.get("primary_reason")
     return dict(sorted(summary.items()))
 
 
@@ -1830,6 +1908,7 @@ def _travel_mode_summary(
             "joker_max_approach_time_hours": status.get("joker_max_approach_time_hours"),
             "normal_max_approach_time": status.get("normal_max_approach_time"),
             "joker_max_approach_time": status.get("joker_max_approach_time"),
+            "evaluated_candidates": 0,
             "normal_candidates": 0,
             "eligible": 0,
             "recommended": 0,
@@ -1838,6 +1917,9 @@ def _travel_mode_summary(
             "rejected": 0,
             "unavailable": 0,
             "reason": status.get("reason"),
+            "empty_reason": status.get("reason") if not status.get("enabled") else None,
+            "reason_counts": {},
+            "best_failed_candidate": None,
         }
         for mode, status in mode_status.items()
     }
@@ -1846,6 +1928,7 @@ def _travel_mode_summary(
         if mode not in summary:
             continue
         result = candidate.get("result")
+        summary[mode]["evaluated_candidates"] += 1
         if candidate.get("approach_time_classification") == "within_normal_limit":
             summary[mode]["normal_candidates"] += 1
         if result == "recommended":
@@ -1860,6 +1943,32 @@ def _travel_mode_summary(
             summary[mode]["rejected"] += 1
         elif result == "unavailable":
             summary[mode]["unavailable"] += 1
+        reason = candidate.get("primary_reason_code")
+        if reason:
+            reason_counts = summary[mode]["reason_counts"]
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        if result in {"compromise", "rejected", "unavailable"}:
+            current = summary[mode]["best_failed_candidate"]
+            current_score = -1 if current is None or current.get("total_score") is None else int(current["total_score"])
+            candidate_score = -1 if candidate.get("total_score") is None else int(candidate["total_score"])
+            if current is None or candidate_score > current_score:
+                summary[mode]["best_failed_candidate"] = {
+                    "destination": candidate.get("destination"),
+                    "score": candidate.get("total_score"),
+                    "period": candidate.get("period"),
+                    "reason": candidate.get("primary_reason"),
+                    "evidence": candidate.get("concise_reason") or candidate.get("supporting_evidence"),
+                }
+    for mode, info in summary.items():
+        if info["empty_reason"] is None and info["enabled"] and info["normal_candidates"] == 0:
+            best = info.get("best_failed_candidate")
+            if best:
+                info["empty_reason"] = (
+                    f"Geen normale {info.get('label', mode).casefold()}-opties. "
+                    f"Beste alternatief: {best['destination']} met {best['score']}/100. {best['evidence']}"
+                )
+            else:
+                info["empty_reason"] = f"Geen {info.get('label', mode).casefold()}-kandidaten beoordeeld."
     return summary
 
 
@@ -2509,38 +2618,8 @@ def _trip_planning_profile(
     ) or str(config.get("travel_strategy", DEFAULT_TRAVEL_STRATEGY))
     if strategy not in TRAVEL_STRATEGY_OPTIONS:
         strategy = TRAVEL_STRATEGY_MOTORCYCLE_DIRECT
-    trailer_support_enabled = _as_bool(
-        config.get(CONF_TRAILER_SUPPORT_ENABLED, DEFAULT_TRAILER_SUPPORT_ENABLED),
-        DEFAULT_TRAILER_SUPPORT_ENABLED,
-    )
     travel_modes = normalize_travel_modes(config)
-    legacy_trailer_available = _state_with_precedence(
-        hass,
-        CONTROL_TRAILER_AVAILABLE,
-        NATIVE_TRAILER_AVAILABLE_ENTITY,
-        TRAILER_AVAILABLE_ENTITY,
-        native_controls,
-    )
-    if legacy_trailer_available is not None and not _as_bool(legacy_trailer_available, True):
-        travel_modes = {
-            **travel_modes,
-            TRAVEL_STRATEGY_TRAILER: {
-                **travel_modes[TRAVEL_STRATEGY_TRAILER],
-                "enabled": False,
-            },
-        }
-    trailer_support_enabled = bool(travel_modes[TRAVEL_STRATEGY_TRAILER]["enabled"] or trailer_support_enabled)
-    preferred_approach_time = _helper_float(
-        hass,
-        MAX_APPROACH_TIME_ENTITY,
-        float(config.get(CONF_PREFERRED_MAX_APPROACH_TIME_HOURS, DEFAULT_PREFERRED_MAX_APPROACH_TIME_HOURS)),
-        minimum=0.5,
-        maximum=12.0,
-        native_controls=native_controls,
-        control_key=CONTROL_MAX_APPROACH_TIME_HOURS,
-        native_entity_id=NATIVE_MAX_APPROACH_TIME_ENTITY,
-    )
-    absolute_approach_time = _optional_float(config.get(CONF_ABSOLUTE_MAX_APPROACH_TIME_HOURS))
+    trailer_enabled = bool(travel_modes[TRAVEL_STRATEGY_TRAILER]["enabled"])
     return TripPlanningProfile(
         travel_strategy=strategy,
         available_hours_per_day=_helper_float(
@@ -2553,12 +2632,12 @@ def _trip_planning_profile(
             control_key=CONTROL_AVAILABLE_HOURS_PER_DAY,
             native_entity_id=NATIVE_AVAILABLE_HOURS_ENTITY,
         ),
-        max_approach_time_hours=preferred_approach_time,
-        preferred_max_approach_time_hours=preferred_approach_time,
-        absolute_max_approach_time_hours=absolute_approach_time,
+        max_approach_time_hours=DEFAULT_PREFERRED_MAX_APPROACH_TIME_HOURS,
+        preferred_max_approach_time_hours=None,
+        absolute_max_approach_time_hours=None,
         travel_modes=travel_modes,
-        trailer_support_enabled=trailer_support_enabled,
-        trailer_available=bool(travel_modes[TRAVEL_STRATEGY_TRAILER]["enabled"]),
+        trailer_support_enabled=trailer_enabled,
+        trailer_available=trailer_enabled,
     )
 
 
@@ -2746,9 +2825,9 @@ def _tradeoffs(experience: Any, window: Any) -> list[str]:
         )
     if getattr(experience, "preferred_approach_time_overrun_hours", 0) > 0:
         tradeoffs.append(
-            "Aanrijtijd overschrijdt de voorkeur: "
+            "Aanrijtijd overschrijdt de normale limiet: "
             f"{experience.approach_time_hours:.1f} uur tegenover "
-            f"{experience.preferred_max_approach_time_hours:.1f} uur voorkeur. "
+            f"{experience.normal_max_approach_time_hours:.1f} uur normale limiet. "
             "Dit verlaagt de ritefficientie, maar wijst de rit niet af."
         )
     if experience.holiday_pressure_score < 80:

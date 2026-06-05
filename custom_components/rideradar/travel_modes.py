@@ -57,7 +57,7 @@ def normalize_travel_modes(config: dict[str, Any]) -> dict[str, dict[str, bool |
             float(defaults["joker_max_approach_time_hours"]),
         )
         enabled_default = bool(defaults["enabled"])
-        if mode == TRAVEL_STRATEGY_TRAILER:
+        if raw is None and mode == TRAVEL_STRATEGY_TRAILER:
             enabled_default = _bool_value(config.get(CONF_TRAILER_SUPPORT_ENABLED), enabled_default)
         enabled = _bool_value(
             config.get(fields["enabled"], configured.get("enabled")),

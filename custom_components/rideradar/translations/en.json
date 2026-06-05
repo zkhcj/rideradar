@@ -22,7 +22,27 @@
           "max_route_distance_km": "Maximum route distance",
           "forecast_days": "Forecast horizon days",
           "preferred_trip_duration": "Default trip duration",
-          "enabled_default_destinations": "Enabled default destinations"
+          "enabled_default_destinations": "Enabled default destinations",
+          "motorcycle_direct_enabled": "Use direct approach route",
+          "motorcycle_direct_normal_max_approach_time_hours": "Normal maximum direct approach time",
+          "motorcycle_direct_joker_max_approach_time_hours": "Maximum direct approach time for a joker",
+          "motorcycle_scenic_enabled": "Use scenic approach route",
+          "motorcycle_scenic_normal_max_approach_time_hours": "Normal maximum scenic approach time",
+          "motorcycle_scenic_joker_max_approach_time_hours": "Maximum scenic approach time for a joker",
+          "trailer_available": "Do you have access to a trailer?",
+          "trailer_normal_max_approach_time_hours": "Normal maximum trailer approach time",
+          "trailer_joker_max_approach_time_hours": "Maximum trailer approach time for a joker"
+        },
+        "data_description": {
+          "motorcycle_direct_enabled": "Enable this to evaluate destinations with a fast/direct approach route.",
+          "motorcycle_direct_normal_max_approach_time_hours": "Destinations within this approach time may be shown as normal direct recommendations.",
+          "motorcycle_direct_joker_max_approach_time_hours": "Exceptionally good destinations may be shown as direct jokers up to this approach time.",
+          "motorcycle_scenic_enabled": "Enable this to evaluate destinations with a scenic/non-motorway approach route.",
+          "motorcycle_scenic_normal_max_approach_time_hours": "Destinations within this approach time may be shown as normal scenic recommendations.",
+          "motorcycle_scenic_joker_max_approach_time_hours": "Exceptionally good destinations may be shown as scenic jokers up to this approach time.",
+          "trailer_available": "Enable this to also evaluate destinations as trailer transport trips.",
+          "trailer_normal_max_approach_time_hours": "Destinations within this approach time may be shown as normal trailer options.",
+          "trailer_joker_max_approach_time_hours": "Exceptionally good destinations may be shown as trailer jokers up to this approach time."
         }
       }
     },
@@ -95,6 +115,17 @@
           "trailer_available": "Do you have access to a trailer?",
           "trailer_normal_max_approach_time_hours": "Normal maximum trailer approach time",
           "trailer_joker_max_approach_time_hours": "Maximum trailer approach time for a joker"
+        },
+        "data_description": {
+          "motorcycle_direct_enabled": "Enable this to evaluate destinations with a fast/direct approach route.",
+          "motorcycle_direct_normal_max_approach_time_hours": "Destinations within this approach time may be shown as normal direct recommendations.",
+          "motorcycle_direct_joker_max_approach_time_hours": "Exceptionally good destinations may be shown as direct jokers up to this approach time.",
+          "motorcycle_scenic_enabled": "Enable this to evaluate destinations with a scenic/non-motorway approach route.",
+          "motorcycle_scenic_normal_max_approach_time_hours": "Destinations within this approach time may be shown as normal scenic recommendations.",
+          "motorcycle_scenic_joker_max_approach_time_hours": "Exceptionally good destinations may be shown as scenic jokers up to this approach time.",
+          "trailer_available": "Enable this to also evaluate destinations as trailer transport trips.",
+          "trailer_normal_max_approach_time_hours": "Destinations within this approach time may be shown as normal trailer options.",
+          "trailer_joker_max_approach_time_hours": "Exceptionally good destinations may be shown as trailer jokers up to this approach time."
         }
       },
       "destinations": {

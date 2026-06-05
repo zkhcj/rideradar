@@ -482,7 +482,7 @@ def calculate_trip_efficiency(
     else:
         approach_classification = "joker_limit_exceeded"
     if preferred_overrun > 0:
-        preference_warnings.append("Aanrijtijd overschrijdt de voorkeurswaarde.")
+        preference_warnings.append("Aanrijtijd overschrijdt de normale limiet.")
     if approach_classification == "within_joker_limit":
         preference_warnings.append("Aanrijtijd valt buiten de normale limiet, maar binnen de jokerlimiet.")
     if approach_classification == "joker_limit_exceeded":

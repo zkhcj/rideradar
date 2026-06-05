@@ -15,7 +15,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import slugify
 
-from .const import ATTRIBUTION, CONF_TRAILER_SUPPORT_ENABLED, DOMAIN, MANUFACTURER
+from .const import ATTRIBUTION, DOMAIN, MANUFACTURER
 from .coordinator import RideRadarDataCoordinator
 from .destinations import destinations_from_config
 from .models import DestinationResult
@@ -277,13 +277,12 @@ def _strategy_top_sensors(entry: ConfigEntry, coordinator: RideRadarDataCoordina
         ("top_forecast_direct_opportunities", "Top Forecast Direct Opportunities", "mdi:highway"),
         ("top_forecast_scenic_opportunities", "Top Forecast Scenic Opportunities", "mdi:map-marker-path"),
     ]
-    if coordinator.config.get(CONF_TRAILER_SUPPORT_ENABLED):
-        descriptions.extend(
-            [
-                ("top_week_trailer_opportunities", "Top Week Trailer Opportunities", "mdi:trailer"),
-                ("top_forecast_trailer_opportunities", "Top Forecast Trailer Opportunities", "mdi:trailer"),
-            ]
-        )
+    descriptions.extend(
+        [
+            ("top_week_trailer_opportunities", "Top Week Trailer Opportunities", "mdi:trailer"),
+            ("top_forecast_trailer_opportunities", "Top Forecast Trailer Opportunities", "mdi:trailer"),
+        ]
+    )
     return [
         RideRadarSensor(
             entry,
@@ -795,8 +794,10 @@ def _top_opportunity_summary(value: object) -> str | None:
 
 def _strategy_top_summary(value: object) -> str:
     if not isinstance(value, dict):
-        return "Geen kansen boven 70 gevonden"
-    return _top_opportunity_summary(value.get("opportunities")) or "Geen kansen boven 70 gevonden"
+        return "Geen kansen boven 70 gevonden; reden nog niet beschikbaar"
+    return _top_opportunity_summary(value.get("opportunities")) or str(
+        value.get("empty_reason") or "Geen kansen boven 70 gevonden; reden nog niet beschikbaar"
+    )
 
 
 def _best_decision_trace(data: dict[str, object]) -> dict[str, Any] | None:

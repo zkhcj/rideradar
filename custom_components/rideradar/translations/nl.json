@@ -22,7 +22,27 @@
           "max_route_distance_km": "Maximale routeafstand",
           "forecast_days": "Voorspellingshorizon in dagen",
           "preferred_trip_duration": "Standaard ritduur",
-          "enabled_default_destinations": "Ingeschakelde standaardbestemmingen"
+          "enabled_default_destinations": "Ingeschakelde standaardbestemmingen",
+          "motorcycle_direct_enabled": "Directe aanrijroute gebruiken",
+          "motorcycle_direct_normal_max_approach_time_hours": "Normale maximale directe aanrijtijd",
+          "motorcycle_direct_joker_max_approach_time_hours": "Maximale directe aanrijtijd voor een joker",
+          "motorcycle_scenic_enabled": "Binnendoor-aanrijroute gebruiken",
+          "motorcycle_scenic_normal_max_approach_time_hours": "Normale maximale binnendoor-aanrijtijd",
+          "motorcycle_scenic_joker_max_approach_time_hours": "Maximale binnendoor-aanrijtijd voor een joker",
+          "trailer_available": "Heb je beschikking over een aanhanger?",
+          "trailer_normal_max_approach_time_hours": "Normale maximale aanrijtijd met aanhanger",
+          "trailer_joker_max_approach_time_hours": "Maximale aanrijtijd met aanhanger voor een joker"
+        },
+        "data_description": {
+          "motorcycle_direct_enabled": "Schakel dit in om bestemmingen met een snelle/directe aanrijroute te beoordelen.",
+          "motorcycle_direct_normal_max_approach_time_hours": "Bestemmingen binnen deze aanrijtijd kunnen als normale directe aanbeveling worden getoond.",
+          "motorcycle_direct_joker_max_approach_time_hours": "Uitzonderlijk goede bestemmingen mogen tot deze aanrijtijd als directe joker worden getoond.",
+          "motorcycle_scenic_enabled": "Schakel dit in om bestemmingen met een binnendoor- of scenic aanrijroute te beoordelen.",
+          "motorcycle_scenic_normal_max_approach_time_hours": "Bestemmingen binnen deze aanrijtijd kunnen als normale binnendoor-aanbeveling worden getoond.",
+          "motorcycle_scenic_joker_max_approach_time_hours": "Uitzonderlijk goede bestemmingen mogen tot deze aanrijtijd als binnendoor-joker worden getoond.",
+          "trailer_available": "Schakel dit in om bestemmingen ook als aanhangerreis te beoordelen.",
+          "trailer_normal_max_approach_time_hours": "Bestemmingen binnen deze aanrijtijd kunnen als normale aanhangeroptie worden getoond.",
+          "trailer_joker_max_approach_time_hours": "Uitzonderlijk goede bestemmingen mogen tot deze aanrijtijd als aanhanger-joker worden getoond."
         }
       }
     },
@@ -95,6 +115,17 @@
           "trailer_available": "Heb je beschikking over een aanhanger?",
           "trailer_normal_max_approach_time_hours": "Normale maximale aanrijtijd met aanhanger",
           "trailer_joker_max_approach_time_hours": "Maximale aanrijtijd met aanhanger voor een joker"
+        },
+        "data_description": {
+          "motorcycle_direct_enabled": "Schakel dit in om bestemmingen met een snelle/directe aanrijroute te beoordelen.",
+          "motorcycle_direct_normal_max_approach_time_hours": "Bestemmingen binnen deze aanrijtijd kunnen als normale directe aanbeveling worden getoond.",
+          "motorcycle_direct_joker_max_approach_time_hours": "Uitzonderlijk goede bestemmingen mogen tot deze aanrijtijd als directe joker worden getoond.",
+          "motorcycle_scenic_enabled": "Schakel dit in om bestemmingen met een binnendoor- of scenic aanrijroute te beoordelen.",
+          "motorcycle_scenic_normal_max_approach_time_hours": "Bestemmingen binnen deze aanrijtijd kunnen als normale binnendoor-aanbeveling worden getoond.",
+          "motorcycle_scenic_joker_max_approach_time_hours": "Uitzonderlijk goede bestemmingen mogen tot deze aanrijtijd als binnendoor-joker worden getoond.",
+          "trailer_available": "Schakel dit in om bestemmingen ook als aanhangerreis te beoordelen.",
+          "trailer_normal_max_approach_time_hours": "Bestemmingen binnen deze aanrijtijd kunnen als normale aanhangeroptie worden getoond.",
+          "trailer_joker_max_approach_time_hours": "Uitzonderlijk goede bestemmingen mogen tot deze aanrijtijd als aanhanger-joker worden getoond."
         }
       },
       "destinations": {

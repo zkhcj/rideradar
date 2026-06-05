@@ -89,11 +89,23 @@ def _patch_setup(monkeypatch, search=_fake_search) -> None:
 
 
 def _settings_input(**overrides):
+    direct = DEFAULT_TRAVEL_MODES["motorcycle_direct"]
+    scenic = DEFAULT_TRAVEL_MODES["motorcycle_scenic"]
+    trailer = DEFAULT_TRAVEL_MODES["trailer"]
     data = {
         CONF_MAX_ROUTE_DISTANCE_KM: DEFAULT_MAX_ROUTE_DISTANCE_KM,
         CONF_FORECAST_DAYS: DEFAULT_FORECAST_DAYS,
         CONF_PREFERRED_TRIP_DURATION: DEFAULT_PREFERRED_TRIP_DURATION,
         CONF_ENABLED_DEFAULT_DESTINATIONS: default_destination_names(),
+        CONF_MOTORCYCLE_DIRECT_ENABLED: direct["enabled"],
+        CONF_MOTORCYCLE_DIRECT_NORMAL_MAX_APPROACH_TIME_HOURS: direct["normal_max_approach_time_hours"],
+        CONF_MOTORCYCLE_DIRECT_JOKER_MAX_APPROACH_TIME_HOURS: direct["joker_max_approach_time_hours"],
+        CONF_MOTORCYCLE_SCENIC_ENABLED: scenic["enabled"],
+        CONF_MOTORCYCLE_SCENIC_NORMAL_MAX_APPROACH_TIME_HOURS: scenic["normal_max_approach_time_hours"],
+        CONF_MOTORCYCLE_SCENIC_JOKER_MAX_APPROACH_TIME_HOURS: scenic["joker_max_approach_time_hours"],
+        CONF_TRAILER_AVAILABLE: trailer["enabled"],
+        CONF_TRAILER_NORMAL_MAX_APPROACH_TIME_HOURS: trailer["normal_max_approach_time_hours"],
+        CONF_TRAILER_JOKER_MAX_APPROACH_TIME_HOURS: trailer["joker_max_approach_time_hours"],
     }
     data.update(overrides)
     return data
@@ -165,6 +177,7 @@ async def test_config_flow_saves_geocoded_start_location(hass, monkeypatch) -> N
     assert CONF_DESTINATIONS not in result["data"]
     assert result["data"][CONF_ENABLED_DEFAULT_DESTINATIONS] == default_destination_names()
     assert result["data"][CONF_CUSTOM_DESTINATIONS] == []
+    assert result["data"][CONF_TRAVEL_MODES]["motorcycle_direct"]["enabled"] is True
 
 
 async def test_config_flow_allows_choosing_geocode_match(hass, monkeypatch) -> None:
@@ -252,6 +265,54 @@ async def test_config_flow_settings_schema_omits_custom_duration_fields(hass, mo
     assert CONF_ACTIVITY_PROFILE not in schema_keys
     assert CONF_DETOUR_FACTOR not in schema_keys
     assert "trailer_support_enabled" not in schema_keys
+    assert CONF_MOTORCYCLE_DIRECT_ENABLED in schema_keys
+    assert CONF_MOTORCYCLE_SCENIC_ENABLED in schema_keys
+    assert CONF_TRAILER_AVAILABLE in schema_keys
+
+
+async def test_config_flow_rejects_invalid_travel_mode_limits(hass, monkeypatch) -> None:
+    _patch_setup(monkeypatch)
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+        data={CONF_START_ADDRESS: "Brussels"},
+    )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={"location": "0"})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input=_settings_input(
+            **{
+                CONF_MOTORCYCLE_DIRECT_NORMAL_MAX_APPROACH_TIME_HOURS: 3.0,
+                CONF_MOTORCYCLE_DIRECT_JOKER_MAX_APPROACH_TIME_HOURS: 2.5,
+            }
+        ),
+    )
+
+    assert result["step_id"] == "settings"
+    assert result["errors"][CONF_MOTORCYCLE_DIRECT_JOKER_MAX_APPROACH_TIME_HOURS] == "joker_below_normal"
+
+
+async def test_config_flow_requires_one_enabled_travel_mode(hass, monkeypatch) -> None:
+    _patch_setup(monkeypatch)
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+        data={CONF_START_ADDRESS: "Brussels"},
+    )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={"location": "0"})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input=_settings_input(
+            **{
+                CONF_MOTORCYCLE_DIRECT_ENABLED: False,
+                CONF_MOTORCYCLE_SCENIC_ENABLED: False,
+                CONF_TRAILER_AVAILABLE: False,
+            }
+        ),
+    )
+
+    assert result["step_id"] == "settings"
+    assert result["errors"]["base"] == "no_travel_mode_enabled"
 
 
 async def test_config_flow_saves_flexible_trip_duration(hass, monkeypatch) -> None:

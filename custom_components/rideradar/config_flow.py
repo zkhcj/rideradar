@@ -162,9 +162,12 @@ class RideRadarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             errors = _settings_errors(user_input)
             if not errors:
+                errors = travel_mode_validation_errors(user_input)
+            if not errors:
                 await self.async_set_unique_id(DOMAIN)
                 self._abort_if_unique_id_configured()
                 self._data.update(_normalized_settings(user_input))
+                self._data.update(travel_mode_options_from_input(user_input))
                 self._data[CONF_ENABLED_DEFAULT_DESTINATIONS] = list(user_input[CONF_ENABLED_DEFAULT_DESTINATIONS])
                 self._data[CONF_CUSTOM_DESTINATIONS] = []
                 return self.async_create_entry(title="RideRadar", data=self._data)
@@ -173,6 +176,7 @@ class RideRadarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=_settings_schema(
                 {CONF_ENABLED_DEFAULT_DESTINATIONS: default_destination_names()},
                 include_trailer=False,
+                include_travel_modes=True,
             ),
             errors=errors,
         )

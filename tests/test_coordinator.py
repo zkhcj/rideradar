@@ -296,16 +296,15 @@ async def test_coordinator_filters_windows_by_preferred_start_day_and_weekend_on
     assert [opportunity["start_date"] for opportunity in data["opportunities"]] == ["2026-06-06"]
 
 
-async def test_coordinator_excludes_trailer_strategy_when_trailer_is_unavailable(hass) -> None:
+async def test_coordinator_uses_canonical_trailer_mode_not_legacy_runtime_switch(hass) -> None:
     forecasts = [
         _forecast_day("2026-06-04"),
         _forecast_day("2026-06-05"),
     ]
     hass.states.async_set("input_select.rideradar_travel_strategy", "Trailer Transport")
-    hass.states.async_set("input_boolean.rideradar_trailer_available", "off")
     entry = _entry(forecast_days=2)
     entry.add_to_hass(hass)
-    hass.config_entries.async_update_entry(entry, options={"trailer_support_enabled": True})
+    hass.config_entries.async_update_entry(entry, options={CONF_TRAVEL_MODES: _travel_modes(trailer=True)})
     coordinator = RideRadarDataCoordinator(
         hass,
         entry,
@@ -315,10 +314,10 @@ async def test_coordinator_excludes_trailer_strategy_when_trailer_is_unavailable
 
     data = await coordinator._async_update_data()
 
-    assert data["travel_strategy"] == "motorcycle_direct"
-    assert data["trailer_available"] is False
-    assert data["mode_status"]["trailer"]["enabled"] is False
-    assert "trailer" not in {item["strategy"] for item in data["all_opportunities"]}
+    assert data["travel_strategy"] == "trailer"
+    assert data["trailer_available"] is True
+    assert data["mode_status"]["trailer"]["enabled"] is True
+    assert "trailer" in {item["strategy"] for item in data["all_opportunities"]}
 
 
 async def test_coordinator_marks_unreachable_destination_without_fetching_weather(hass) -> None:
@@ -374,7 +373,6 @@ async def test_preferred_approach_time_does_not_reject_harz_like_destination(has
         DestinationRoutingClient({"Harz": RouteInfo(365, 260, "test")}),
     )
     coordinator.set_runtime_control("trip_duration", "3 days")
-    coordinator.set_runtime_control("max_approach_time_hours", "3.5")
 
     data = await coordinator._async_update_data()
 

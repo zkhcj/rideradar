@@ -226,7 +226,7 @@ sections:
           RideRadar raadt dit niet actief aan, maar dit is de minst slechte bruikbare optie.
           {% else %}
           ## Geen bruikbaar advies
-          {{ candidate.get('supporting_evidence', 'Geen kandidaat kon volledig worden beoordeeld.') }}
+          {{ candidate.get('primary_reason', 'Geen kandidaat kon volledig worden beoordeeld.') }}
           {% endif %}
 
           **Score:** {{ candidate.get('total_score', 'n.b.') }}/100
@@ -239,7 +239,7 @@ sections:
 
           **Datakwaliteit:** {{ candidate.get('weather_status', 'onbekend') }}
 
-          **Waarom:** {{ candidate.get('supporting_evidence', 'Geen onderbouwing beschikbaar.') }}
+          **Waarom deze optie:** {{ candidate.get('concise_reason', 'Nog geen korte onderbouwing beschikbaar.') }}
 
           **Aanrijtijd:** {{ approach.get('human_readable', candidate.get('approach_time_human_readable', 'n.b.')) }}
 
@@ -305,7 +305,7 @@ sections:
 
           Aanrijtijd: {{ item.get('approach_time_human_readable', 'n.b.') }}. {{ item.get('normal_limit_overrun_minutes', 0) }} minuten langer dan jouw normale limiet, binnen jokerlimiet {{ item.get('approach_time', {}).get('joker_max', 'n.v.t.') if item.get('approach_time', {}) is mapping else 'n.v.t.' }}.
 
-          {{ item.get('supporting_evidence', 'Geen onderbouwing beschikbaar.') }}
+          {{ item.get('concise_reason', 'Geen korte onderbouwing beschikbaar.') }}
 
           {% endif %}
           {% endfor %}
@@ -335,6 +335,7 @@ sections:
           {% for period, mode, entity in groups %}
           {% set options = state_attr(entity, 'opportunities') or [] %}
           {% set rejected = state_attr(entity, 'best_rejected_candidate') %}
+          {% set empty_reason = state_attr(entity, 'empty_reason') %}
           **{{ period }} · {{ mode }}**
           {% if options %}
           {{ options | count }} geldige optie{{ 's' if options | count != 1 else '' }} gevonden.
@@ -343,9 +344,10 @@ sections:
           {{ loop.index }}. {{ item.get('destination', 'n.b.') }} · {{ item.get('ride_quality_score', 'n.b.') }}/100 · {{ item.get('period', 'Nog niet beschikbaar') }} · {{ item.get('duration_days', 'n.b.') }} dagen · aanrijtijd {{ item.get('approach_time_human_readable', 'n.b.') }}
           {% endfor %}
           {% elif rejected is mapping %}
-          Geen geldige opties. Beste compromis: {{ rejected.get('destination', 'n.b.') }} · {{ rejected.get('ride_quality_score', 'n.b.') }}/100. Reden: {{ rejected.get('main_tradeoff', 'Score blijft onder de adviesdrempel.') }}
+          Geen normale opties. Beste alternatief: {{ rejected.get('destination', 'n.b.') }} · {{ rejected.get('ride_quality_score', 'n.b.') }}/100 · aanrijtijd {{ rejected.get('approach_time_human_readable', 'n.b.') }}.
+          {{ empty_reason or rejected.get('concise_reason', rejected.get('main_tradeoff', 'Score blijft onder de adviesdrempel.')) }}
           {% else %}
-          Geen geldige opties.
+          {{ empty_reason or 'Geen opties beoordeeld; controleer of deze reisstrategie is ingeschakeld.' }}
           {% endif %}
 
           {% endfor %}
@@ -357,7 +359,7 @@ Screenshot placeholder: add your dashboard screenshot at `docs/images/rideradar-
 
 ## Optional: RideRadar Settings & Debug View
 
-The default dashboard is intentionally rider-first. Use this optional view when you want controls and diagnostics on a separate page. RideRadar creates these controls automatically; legacy `input_*` helpers are only read as fallback for older dashboards.
+The default dashboard is intentionally rider-first. Use this optional view when you want controls and diagnostics on a separate page.
 
 ```yaml
 title: RideRadar Settings & Debug
@@ -383,12 +385,8 @@ sections:
             name: Alleen weekend
           - entity: select.rideradar_travel_strategy
             name: Reisstrategie
-          - entity: switch.rideradar_trailer_available
-            name: Aanhanger vandaag beschikbaar
           - entity: number.rideradar_available_hours_per_day
             name: Beschikbare uren per dag
-          - entity: number.rideradar_max_approach_time_hours
-            name: Voorkeurs-aanrijtijd
       - type: markdown
         title: Reisstrategieen
         content: |
@@ -416,8 +414,6 @@ sections:
           {% set caps = trace.get('caps', []) if trace is mapping else [] %}
 
           Strategie: **{{ inputs.get('travel_strategy', 'onbekend') }}**
-
-          Aanhanger beschikbaar: **{{ inputs.get('trailer_available', 'onbekend') }}**
 
           Duur: **{{ state_attr(duration, 'duration_label') or states(duration) ~ ' dagen' }}**
 
@@ -479,13 +475,13 @@ sections:
 
 Supported `select.rideradar_trip_duration` values include `1 day`, `2 days`, `3 days`, `flexible`, and `custom`.
 Supported `select.rideradar_travel_strategy` values include `Motorcycle Direct`, `Motorcycle Scenic Approach`, and `Trailer Transport`.
-Trailer recommendations only appear when trailer transport mode is enabled in configuration and `switch.rideradar_trailer_available` is on. Configuration support means "this rider can use trailer transport"; runtime availability means "the trailer is available today".
+Trailer recommendations appear when trailer transport is enabled in the RideRadar travel-mode configuration. There is no second hidden trailer switch in the recommendation pipeline.
 
 ## All Options Dashboard
 
 The default dashboard stays rider-first. For power users, RideRadar also exposes `sensor.rideradar_all_opportunities`.
 
-This sensor compares realistic opportunities side by side across multiple durations and strategies. By default the public table attribute contains candidates scoring 60+ and is capped to a reasonable size. It evaluates 2-day through 4-day windows when the forecast horizon allows it, and extends higher when the configured/custom maximum trip duration is higher. Direct and scenic strategies are shown side by side. Trailer opportunities are hidden unless trailer transport support is enabled and `switch.rideradar_trailer_available` is on; if trailer is unavailable, exclusion/debug data still explains why trailer options are absent.
+This sensor compares realistic opportunities side by side across multiple durations and strategies. By default the public table attribute contains candidates scoring 60+ and is capped to a reasonable size. It evaluates 2-day through 4-day windows when the forecast horizon allows it, and extends higher when the configured/custom maximum trip duration is higher. Direct, scenic and trailer strategies are shown side by side when those modes are enabled in the RideRadar travel-mode configuration.
 
 For sorting/filtering, install `custom:flex-table-card` through HACS. Its documentation describes selecting entity attributes as columns and expanding list attributes into rows, which is how the `opportunities` attribute is used here: https://github.com/custom-cards/flex-table-card
 
@@ -509,8 +505,6 @@ sections:
             name: Alleen weekend
           - entity: select.rideradar_preferred_start_day
             name: Gewenste startdag
-          - entity: switch.rideradar_trailer_available
-            name: Aanhanger vandaag beschikbaar
       - type: custom:flex-table-card
         title: Alle RideRadar opties
         entities:

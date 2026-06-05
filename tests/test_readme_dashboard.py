@@ -42,13 +42,18 @@ def test_default_dashboard_uses_native_entities_and_literal_markdown_tables() ->
         "select.rideradar_preferred_start_day",
         "switch.rideradar_weekend_only",
         "select.rideradar_travel_strategy",
-        "switch.rideradar_trailer_available",
         "number.rideradar_available_hours_per_day",
-        "number.rideradar_max_approach_time_hours",
         "sensor.rideradar_all_opportunities",
     ):
         assert entity_id in readme
 
+    assert "switch.rideradar_trailer_available" not in readme
+    assert "number.rideradar_max_approach_time_hours" not in readme
+    assert "Voorkeurs-aanrijtijd" not in readme
+    assert "Absolute aanrijlimiet" not in readme
+    assert "Geen geldige opties." not in readme
+    assert "concise_reason" in readme
+    assert "empty_reason" in readme
     assert "'Deze week', 'direct'" in readme
     assert "'Deze week', 'binnendoor'" in readme
     assert "'Deze maand', 'direct'" in readme
@@ -72,7 +77,7 @@ def test_default_dashboard_uses_native_entities_and_literal_markdown_tables() ->
         "Normaal | Joker | Over normaal | Over joker | Classificatie | Routing | Reden | Bewijs | "
         "Provider | Forecastlocatie | Cache | Ontbrekend |"
     ) in readme
-    assert "Aanhanger vandaag beschikbaar" in readme
+    assert "Aanhangertransport staat uit" in readme
     assert "type: custom:flex-table-card" in readme
     assert "opportunities.score" in readme
     assert "opportunities.strategy_label" in readme

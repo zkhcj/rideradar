@@ -135,18 +135,15 @@ async def test_all_opportunities_hide_trailer_when_support_is_disabled(hass) -> 
     assert "trailer" not in {item["strategy"] for item in data["all_opportunities"]}
 
 
-async def test_all_opportunities_include_trailer_only_when_available(hass) -> None:
+async def test_all_opportunities_include_trailer_when_mode_enabled_even_if_legacy_switch_off(hass) -> None:
     coordinator = RideRadarDataCoordinator(
         hass, _entry_with_modes(_travel_modes(trailer=True)), FakeApiClient(), FakeRoutingClient()
     )
     coordinator.set_runtime_control("trailer_available", "off")
 
-    unavailable = await coordinator._async_update_data()
-    assert "trailer" not in {item["strategy"] for item in unavailable["all_opportunities"]}
+    data = await coordinator._async_update_data()
 
-    coordinator.set_runtime_control("trailer_available", "on")
-    available = await coordinator._async_update_data()
-    assert "trailer" in {item["strategy"] for item in available["all_opportunities"]}
+    assert "trailer" in {item["strategy"] for item in data["all_opportunities"]}
 
 
 async def test_all_opportunities_attribute_size_is_limited(hass) -> None:
@@ -233,7 +230,7 @@ async def test_strategy_top_rejected_candidate_when_no_70_plus(hass) -> None:
     assert group["best_rejected_candidate"]["ride_quality_score"] < 70
 
 
-async def test_strategy_trailer_sensors_only_created_when_enabled(hass) -> None:
+async def test_strategy_trailer_sensors_are_created_for_empty_reason_visibility(hass) -> None:
     disabled_entry = _entry(trailer_support_enabled=False)
     disabled_coordinator = RideRadarDataCoordinator(hass, disabled_entry, FakeApiClient(), FakeRoutingClient())
     disabled_coordinator.data = await disabled_coordinator._async_update_data()
@@ -242,7 +239,12 @@ async def test_strategy_trailer_sensors_only_created_when_enabled(hass) -> None:
 
     await async_setup_sensor(hass, disabled_entry, disabled_entities.extend)
 
-    assert not any(entity.unique_id.endswith("_top_week_trailer_opportunities") for entity in disabled_entities)
+    assert any(entity.unique_id.endswith("_top_week_trailer_opportunities") for entity in disabled_entities)
+    trailer_sensor = next(
+        entity for entity in disabled_entities if entity.unique_id.endswith("_top_week_trailer_opportunities")
+    )
+    assert trailer_sensor.extra_state_attributes["empty_reason"] == "Aanhangertransport staat uit"
+    assert trailer_sensor.extra_state_attributes["candidate_count"] == 0
 
     enabled_entry = _entry(trailer_support_enabled=True)
     enabled_coordinator = RideRadarDataCoordinator(hass, enabled_entry, FakeApiClient(), FakeRoutingClient())
@@ -462,3 +464,27 @@ async def test_same_destination_can_classify_differently_by_travel_mode(hass) ->
     assert classifications["motorcycle_direct"] == "within_normal_limit"
     assert classifications["motorcycle_scenic"] in {"within_joker_limit", "joker_limit_exceeded"}
     assert classifications["trailer"] == "within_normal_limit"
+
+
+async def test_sauerland_generates_trailer_candidate_when_trailer_mode_enabled(hass) -> None:
+    destinations = [DestinationArea("Sauerland", "Germany", 51.0, 8.0).as_dict()]
+    modes = _travel_modes(direct=True, scenic=True, trailer=True)
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        _entry_with_modes(modes, destinations=destinations),
+        FakeApiClient(),
+        FakeRoutingClient(),
+    )
+
+    data = await coordinator._async_update_data()
+    trailer_candidates = [
+        item
+        for item in data["all_opportunities"]
+        if item["destination"] == "Sauerland" and item["strategy"] == "trailer"
+    ]
+
+    assert trailer_candidates
+    assert trailer_candidates[0]["approach_time_classification"] == "within_normal_limit"
+    assert trailer_candidates[0]["normal_max_approach_time_hours"] == 4.0
+    assert data["top_week_trailer_opportunities"]["candidate_count"] > 0
+    assert data["top_week_trailer_opportunities"]["empty_reason"] is None
