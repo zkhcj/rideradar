@@ -53,6 +53,8 @@ class TripPlanningProfile:
     travel_strategy: str = "motorcycle_direct"
     available_hours_per_day: float = 8.0
     max_approach_time_hours: float = 4.0
+    preferred_max_approach_time_hours: float | None = None
+    absolute_max_approach_time_hours: float | None = None
     trailer_support_enabled: bool = False
     trailer_available: bool = False
 
@@ -304,9 +306,9 @@ def calculate_ride_experience(
     score_caps = _score_caps(score_components)
     for cap in score_caps:
         ride_quality_score = min(ride_quality_score, int(cap["cap"]))
-    if trip_efficiency["exclusion_reasons"]:
+    if trip_efficiency["hard_exclusion_reasons"]:
         ride_quality_score = min(ride_quality_score, 45)
-        score_caps.append({"reason": "excluded_by_trip_efficiency", "cap": 45})
+        score_caps.append({"reason": "excluded_by_hard_trip_constraint", "cap": 45})
     verdict = ride_verdict(ride_quality_score)
     recommendation_type = "least_bad_option" if ride_quality_score < 70 else "recommended"
 
@@ -318,7 +320,7 @@ def calculate_ride_experience(
         trip_efficiency["trip_efficiency_score"],
         holiday_names,
         access_notes,
-        trip_efficiency["exclusion_reasons"],
+        trip_efficiency["hard_exclusion_reasons"],
         score_components,
         recommendation_type,
     )
@@ -337,10 +339,17 @@ def calculate_ride_experience(
         travel_strategy=str(trip_efficiency["travel_strategy"]),
         approach_time_hours=float(trip_efficiency["approach_time_hours"]),
         return_time_hours=float(trip_efficiency["return_time_hours"]),
+        total_transport_time_hours=float(trip_efficiency["total_transport_time_hours"]),
         total_available_time_hours=float(trip_efficiency["total_available_time_hours"]),
         estimated_destination_ride_time_hours=float(trip_efficiency["estimated_destination_ride_time_hours"]),
         approach_enjoyment_factor=float(trip_efficiency["approach_enjoyment_factor"]),
         destination_ride_time_ratio=float(trip_efficiency["destination_ride_time_ratio"]),
+        preferred_max_approach_time_hours=trip_efficiency["preferred_max_approach_time_hours"],
+        absolute_max_approach_time_hours=trip_efficiency["absolute_max_approach_time_hours"],
+        preferred_approach_time_overrun_hours=float(trip_efficiency["preferred_approach_time_overrun_hours"]),
+        absolute_approach_time_overrun_hours=float(trip_efficiency["absolute_approach_time_overrun_hours"]),
+        preference_warnings=list(trip_efficiency["preference_warnings"]),
+        hard_exclusion_reasons=list(trip_efficiency["hard_exclusion_reasons"]),
         score_weights=dict(RIDE_QUALITY_WEIGHTS),
         score_caps=score_caps,
         verdict=verdict,
@@ -350,7 +359,7 @@ def calculate_ride_experience(
         access_notes=access_notes,
         access_warnings=[] if access_score >= 80 else access_notes,
         known_restrictions=[] if "geen grote motorbeperkingen" in access_notes[0] else access_notes,
-        exclusion_reasons=list(trip_efficiency["exclusion_reasons"]),
+        exclusion_reasons=list(trip_efficiency["hard_exclusion_reasons"]),
         explanation=explanation,
     )
 
@@ -409,13 +418,25 @@ def calculate_trip_efficiency(
         strategy = "motorcycle_direct"
         approach_enjoyment_factor = 0.20
 
-    exclusion_reasons: list[str] = []
+    hard_exclusion_reasons: list[str] = []
+    preference_warnings: list[str] = []
     if strategy == "trailer" and not planning_profile.trailer_support_enabled:
-        exclusion_reasons.append("Trailer transport is disabled in RideRadar options.")
+        hard_exclusion_reasons.append("Trailer transport is disabled in RideRadar options.")
     if strategy == "trailer" and not planning_profile.trailer_available:
-        exclusion_reasons.append("Trailer transport was selected but the trailer is not available.")
-    if approach_time_hours > planning_profile.max_approach_time_hours:
-        exclusion_reasons.append("Outside configured max travel effort.")
+        hard_exclusion_reasons.append("Trailer transport was selected but the trailer is not available.")
+
+    preferred_limit = (
+        planning_profile.preferred_max_approach_time_hours
+        if planning_profile.preferred_max_approach_time_hours is not None
+        else planning_profile.max_approach_time_hours
+    )
+    absolute_limit = planning_profile.absolute_max_approach_time_hours
+    preferred_overrun = max(0.0, approach_time_hours - preferred_limit) if preferred_limit else 0.0
+    absolute_overrun = max(0.0, approach_time_hours - absolute_limit) if absolute_limit else 0.0
+    if preferred_overrun > 0:
+        preference_warnings.append("Aanrijtijd overschrijdt de voorkeurswaarde.")
+    if absolute_limit is not None and approach_time_hours > absolute_limit:
+        hard_exclusion_reasons.append("Absolute max approach time exceeded.")
 
     return_time_hours = approach_time_hours
     total_available_time_hours = max(1.0, planning_profile.available_hours_per_day * window.duration_days)
@@ -437,19 +458,28 @@ def calculate_trip_efficiency(
     else:
         score = 18
     score = _clamp_score((score * 0.75) + (enjoyment_ratio * 100 * 0.25))
-    if exclusion_reasons:
+    if preferred_overrun > 0:
+        score = _clamp_score(score - min(30, preferred_overrun * 8))
+    if hard_exclusion_reasons:
         score = min(score, 30)
 
     return {
         "travel_strategy": strategy,
         "approach_time_hours": round(approach_time_hours, 2),
         "return_time_hours": round(return_time_hours, 2),
+        "total_transport_time_hours": round(transfer_time, 2),
         "total_available_time_hours": round(total_available_time_hours, 2),
         "estimated_destination_ride_time_hours": round(usable_trip_time, 2),
         "approach_enjoyment_factor": round(approach_enjoyment_factor, 2),
         "destination_ride_time_ratio": round(destination_ride_time_ratio, 3),
         "trip_efficiency_score": score,
-        "exclusion_reasons": exclusion_reasons,
+        "preferred_max_approach_time_hours": round(preferred_limit, 2) if preferred_limit else None,
+        "absolute_max_approach_time_hours": round(absolute_limit, 2) if absolute_limit is not None else None,
+        "preferred_approach_time_overrun_hours": round(preferred_overrun, 2),
+        "absolute_approach_time_overrun_hours": round(absolute_overrun, 2),
+        "preference_warnings": preference_warnings,
+        "hard_exclusion_reasons": hard_exclusion_reasons,
+        "exclusion_reasons": hard_exclusion_reasons,
     }
 
 

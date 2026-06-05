@@ -4,6 +4,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.rideradar.api import RideRadarApiError
 from custom_components.rideradar.const import (
+    CONF_ABSOLUTE_MAX_APPROACH_TIME_HOURS,
     CONF_ACTIVITY_PROFILE,
     CONF_CUSTOM_TRIP_DURATION_DAYS,
     CONF_DESTINATIONS,
@@ -26,6 +27,7 @@ from custom_components.rideradar.models import DailyForecast, DestinationArea, R
 
 class FakeApiClient:
     def __init__(self, forecasts=None, error=None) -> None:
+        self.calls = 0
         self.forecasts = forecasts or [
             DailyForecast("2026-06-02", 22, 5, 0, 12, 20, 30, 1),
             DailyForecast("2026-06-03", 12, 60, 2, 25, 40, 90, 61),
@@ -33,6 +35,7 @@ class FakeApiClient:
         self.error = error
 
     async def get_daily_forecast(self, latitude, longitude, forecast_days):
+        self.calls += 1
         if self.error:
             raise self.error
         return self.forecasts[:forecast_days]
@@ -44,6 +47,16 @@ class FakeRoutingClient:
 
     async def get_route(self, start_latitude, start_longitude, destination, activity_profile):
         return RouteInfo(self.distance_km, 90, f"fake_{activity_profile}")
+
+
+class DestinationRoutingClient:
+    def __init__(self, routes: dict[str, RouteInfo]) -> None:
+        self.routes = routes
+        self.requests: list[str] = []
+
+    async def get_route(self, start_latitude, start_longitude, destination, activity_profile):
+        self.requests.append(destination.name)
+        return self.routes[destination.name]
 
 
 class DestinationForecastApiClient:
@@ -82,6 +95,11 @@ def _entry(destinations=None, max_distance=300, forecast_days=2):
             CONF_DESTINATIONS: destination_data,
         },
     )
+
+
+def _entry_with_options(destinations=None, max_distance=300, forecast_days=2, options=None):
+    entry = _entry(destinations=destinations, max_distance=max_distance, forecast_days=forecast_days)
+    return MockConfigEntry(domain=entry.domain, data=entry.data, options=options or {})
 
 
 def _forecast_day(day, score_weather=1):
@@ -304,6 +322,109 @@ async def test_coordinator_does_not_rank_limited_forecast_as_complete_trip(hass)
 
     assert data["best"] is None
     assert data["results"][0].trip_score is None
+
+
+async def test_preferred_approach_time_does_not_reject_harz_like_destination(hass) -> None:
+    destinations = [
+        DestinationArea("Harz", "Duitsland", 51.8, 10.62).as_dict(),
+    ]
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        _entry(destinations=destinations, max_distance=1350, forecast_days=3),
+        FakeApiClient(
+            forecasts=[
+                _forecast_day("2026-06-04"),
+                _forecast_day("2026-06-05"),
+                _forecast_day("2026-06-06"),
+            ]
+        ),
+        DestinationRoutingClient({"Harz": RouteInfo(365, 260, "test")}),
+    )
+    coordinator.set_runtime_control("trip_duration", "3 days")
+    coordinator.set_runtime_control("max_approach_time_hours", "3.5")
+
+    data = await coordinator._async_update_data()
+
+    assert data["opportunities"]
+    assert data["best"].destination.name == "Harz"
+    assert data["opportunities"][0]["preferred_approach_time_overrun_hours"] > 0
+    assert data["opportunities"][0]["absolute_max_approach_time_hours"] is None
+    assert not any(item["reason"] == "approach_time_too_high" for item in data["excluded_destinations"])
+
+
+async def test_explicit_absolute_approach_limit_rejects_candidate(hass) -> None:
+    destinations = [DestinationArea("Harz", "Duitsland", 51.8, 10.62).as_dict()]
+    api = FakeApiClient(
+        forecasts=[
+            _forecast_day("2026-06-04"),
+            _forecast_day("2026-06-05"),
+            _forecast_day("2026-06-06"),
+        ]
+    )
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        _entry_with_options(
+            destinations=destinations,
+            max_distance=1350,
+            forecast_days=3,
+            options={CONF_ABSOLUTE_MAX_APPROACH_TIME_HOURS: 3.0},
+        ),
+        api,
+        DestinationRoutingClient({"Harz": RouteInfo(365, 260, "test")}),
+    )
+
+    data = await coordinator._async_update_data()
+
+    assert data["opportunities"] == []
+    assert any(item["reason"] == "absolute_approach_time_exceeded" for item in data["excluded_destinations"])
+    assert api.calls == 0
+    assert data["weather"]["weather_fetch_summary"]["destinations_skipped_by_hard_constraint"] == 1
+
+
+async def test_highest_eligible_candidate_becomes_recommended(hass) -> None:
+    destinations = [DestinationArea("Sauerland", "Duitsland", 51.18, 8.25).as_dict()]
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        _entry(destinations=destinations, max_distance=1350, forecast_days=3),
+        FakeApiClient(
+            forecasts=[
+                _forecast_day("2026-06-04"),
+                _forecast_day("2026-06-05"),
+                DailyForecast("2026-06-06", 12, 80, 6, 35, 55, 90, 61),
+            ]
+        ),
+        FakeRoutingClient(distance_km=220),
+    )
+    coordinator.set_runtime_control("trip_duration", "3 days")
+
+    data = await coordinator._async_update_data()
+    recommended = [candidate for candidate in data["evaluated_candidates"] if candidate["result"] == "recommended"]
+
+    assert recommended
+    assert recommended[0]["destination"] == data["best"].destination.name
+    assert data["evaluation_summary"]["recommended"] == 1
+
+
+async def test_weather_score_zero_has_weather_evidence(hass) -> None:
+    coordinator = RideRadarDataCoordinator(
+        hass,
+        _entry(forecast_days=2),
+        FakeApiClient(
+            forecasts=[
+                DailyForecast("2026-06-04", 2, 100, 20, 70, 95, 100, 95),
+                DailyForecast("2026-06-05", 2, 100, 20, 70, 95, 100, 95),
+            ]
+        ),
+        FakeRoutingClient(distance_km=100),
+    )
+
+    data = await coordinator._async_update_data()
+    candidate = data["evaluated_candidates"][0]
+
+    assert candidate["weather_score"] == 0
+    assert candidate["weather_evaluation"]["aggregate"]["total_precipitation_mm"] == 40
+    assert candidate["weather_evaluation"]["penalties"]
+    assert candidate["result"] == "compromise"
 
 
 async def test_coordinator_marks_weather_unavailable_when_api_unavailable(hass) -> None:

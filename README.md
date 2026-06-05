@@ -59,6 +59,43 @@ Top week and top forecast cards only show opportunities with `ride_quality_score
 
 Current holiday, access, traffic pressure, tourism pressure, and road-fun scoring is deterministic and offline-friendly. It uses destination profiles, public-holiday calculations, long-weekend detection, seasonality, and known regional motorcycle restriction risk. Future routing providers can replace these heuristics with live traffic and road closure data.
 
+## Decision Model
+
+RideRadar separates hard constraints from preferences.
+
+Hard constraints are rules that make a candidate impossible or explicitly forbidden. Examples are an explicitly disabled destination, the absolute maximum route distance, unavailable required trailer transport, missing weather data with no fallback, and an explicitly configured `absolute_max_approach_time_hours`.
+
+Preferences influence ranking and compromise labels, but do not reject a candidate by themselves. Examples are preferred trip duration, preferred start day, preferred travel strategy, preferred maximum approach time, preferred weather quality and preferred trip efficiency.
+
+The native dashboard entity `number.rideradar_max_approach_time_hours` is a preferred approach-time target. Existing `max_approach_time_hours` values are treated as `preferred_max_approach_time_hours` for backwards compatibility. They reduce `trip_efficiency_score` when exceeded, but they do not reject Harz, Sauerland or another destination. A hard approach-time rejection only happens when `absolute_max_approach_time_hours` is configured separately.
+
+Preferred trip duration works the same way. A 3-day preference gives context to ranking and evidence, but a strong 2-day Sauerland ride can still become the recommendation when it is the highest eligible candidate. RideRadar evaluates 2-day through the preferred maximum duration for normal multi-day planning, and 1-day windows only when the selected duration is one day or flexible mode explicitly includes them.
+
+Candidate categories:
+
+| Category | Meaning |
+| --- | --- |
+| `recommended` | Highest-ranked candidate scoring 70+ and meeting hard requirements |
+| `eligible` | Meets hard requirements and score threshold, but ranks below the recommendation |
+| `compromise` | Usable, but below the 70 recommendation threshold or outside a preference |
+| `rejected` | Violates a real hard constraint |
+| `unavailable` | Cannot be evaluated because required data is unavailable |
+
+Disabled travel modes are exposed as mode status, not fake rejected candidates. For example, if trailer support is disabled, the dashboard can say "Aanhangertransport staat uit" without adding trailer rows to rejected candidate totals.
+
+Trip efficiency is duration-aware:
+
+```text
+total_available_time = available_hours_per_day × duration_days
+total_transport_time = outbound_approach_time + return_approach_time
+usable_destination_time = total_available_time - total_transport_time
+destination_ride_time_ratio = usable_destination_time / total_available_time
+```
+
+A four-hour approach can be poor for a one-day ride but acceptable for a three-day or four-day trip. Candidate evidence exposes approach time, return time, transport time, available trip hours, usable destination hours, preferred approach overrun, absolute approach limit and trip-efficiency score.
+
+Weather scores include an audit trail in the evaluated candidate data. For low or zero weather scores, the debug dashboard can show precipitation amount, rain probability, temperature, wind, gusts, cloud cover, weather code, daily scores and applied penalties. Longer windows are scored by daily scores plus a bounded bad-weather penalty; they do not receive extra penalties merely because they contain more days.
+
 ## 10-Step Quickstart
 
 1. Install RideRadar through HACS as a custom repository.
@@ -96,7 +133,10 @@ sections:
           {% set eval = eval if eval is mapping else {} %}
           {% set status = states('sensor.rideradar_weather_status') %}
           {% set provider = state_attr('sensor.rideradar_weather_status', 'provider_used') or state_attr('sensor.rideradar_weather_status', 'primary_provider') or 'onbekend' %}
-          {% set location = state_attr('sensor.rideradar_weather_status', 'forecast_location_name') or 'de bestemming' %}
+          {% set coverage = state_attr('sensor.rideradar_weather_status', 'forecast_coverage') or {} %}
+          {% set coverage = coverage if coverage is mapping else {} %}
+          {% set fetch = state_attr('sensor.rideradar_weather_status', 'weather_fetch_summary') or {} %}
+          {% set fetch = fetch if fetch is mapping else {} %}
           {% set fallback = state_attr('sensor.rideradar_weather_status', 'fallback_provider_used') %}
           {% set age = state_attr('sensor.rideradar_weather_status', 'forecast_cache_age_hours') %}
           {% set updated = state_attr('sensor.rideradar_weather_status', 'last_successful_update') %}
@@ -109,14 +149,18 @@ sections:
           ## RideRadar {{ 'werkt' if total | int(0) > 0 else 'wacht op data' }}
 
           {% if status == 'ok' %}
-          Weerdata voor **{{ location }}** is vers via **{{ provider_label }}**.
+          Weerdata is vers via **{{ provider_label }}**.
           {% elif status == 'partial' %}
-          Weerdata voor **{{ location }}** is gedeeltelijk beschikbaar via **{{ provider_label }}**. Het advies is beperkt.
+          Weerdata is gedeeltelijk beschikbaar via **{{ provider_label }}**. Het advies is beperkt.
           {% elif status == 'stale' %}
-          RideRadar gebruikt de laatst bekende weersverwachting voor **{{ location }}**. Het advies is beperkt.
+          RideRadar gebruikt deels de laatst bekende weersverwachting. Het advies is beperkt.
           {% else %}
-          Geen bruikbare weerdata beschikbaar voor **{{ location }}**. RideRadar toont alleen kandidaten zonder definitief weeradvies.
+          Geen bruikbare weerdata beschikbaar. RideRadar toont alleen kandidaten zonder definitief weeradvies.
           {% endif %}
+
+          **Weerdekking:** {{ coverage.get('destinations_with_fresh_weather', 0) }} van {{ coverage.get('destinations_requested', 0) }} relevante bestemmingen vers · {{ coverage.get('destinations_with_stale_weather', 0) }} stale · {{ coverage.get('destinations_without_weather', 0) }} zonder weerdata
+
+          **Weerfetch:** {{ fetch.get('live_provider_calls', 0) }} live calls · {{ fetch.get('cache_hits', 0) }} cache hits · {{ fetch.get('failed_fetches', 0) }} mislukt
 
           {% if fallback %}
           Fallback actief: **{{ fallback | replace('_', '-') | title }}**.
@@ -164,13 +208,17 @@ sections:
 
           **Waarom:** {{ candidate.get('supporting_evidence', 'Geen onderbouwing beschikbaar.') }}
 
+          **Aanrijtijd:** {{ candidate.get('approach_time_hours', 'n.b.') }} uur · voorkeur {{ candidate.get('preferred_max_approach_time_hours', 'n.b.') }} uur · absolute limiet {{ candidate.get('absolute_max_approach_time_hours', 'geen') }}
+
       - type: markdown
         title: Afwijzingssamenvatting
         content: |
           {% set eval = state_attr('sensor.rideradar_evaluation_summary', 'evaluation_summary') or {} %}
           {% set eval = eval if eval is mapping else {} %}
           {% set reason_counts = eval.get('rejection_reason_counts', {}) if eval.get('rejection_reason_counts', {}) is mapping else {} %}
+          {% set compromise_counts = eval.get('compromise_reason_counts', {}) if eval.get('compromise_reason_counts', {}) is mapping else {} %}
           {% set reason_labels = eval.get('rejection_reason_labels', {}) if eval.get('rejection_reason_labels', {}) is mapping else {} %}
+          {% set compromise_labels = eval.get('compromise_reason_labels', {}) if eval.get('compromise_reason_labels', {}) is mapping else {} %}
           **{{ eval.get('total_candidates', 0) }}** kandidaten beoordeeld
 
           **{{ eval.get('recommended', 0) }}** aanbevolen · **{{ eval.get('eligible', 0) }}** geschikt · **{{ eval.get('compromises', 0) }}** compromis · **{{ eval.get('rejected', 0) }}** afgewezen · **{{ eval.get('unavailable', 0) }}** niet beoordeelbaar
@@ -182,6 +230,13 @@ sections:
           {% endfor %}
           {% else %}
           Geen afwijzingen.
+          {% endif %}
+
+          {% if compromise_counts %}
+          Compromisredenen:
+          {% for reason, count in compromise_counts.items() %}
+          - {{ count }} × {{ compromise_labels.get(reason, reason) }}
+          {% endfor %}
           {% endif %}
   - type: grid
     cards:
@@ -252,7 +307,7 @@ sections:
           - entity: number.rideradar_available_hours_per_day
             name: Beschikbare uren per dag
           - entity: number.rideradar_max_approach_time_hours
-            name: Maximale aanrijtijd
+            name: Voorkeurs-aanrijtijd
       - type: markdown
         title: Debug trace
         content: |
@@ -316,13 +371,13 @@ sections:
         title: Evaluatietabel
         content: |
           {% set rows = state_attr('sensor.rideradar_evaluation_summary', 'evaluated_candidates') or [] %}
-          | Status | Bestemming | Modus | Periode | Dagen | Score | Weer | Reden | Bewijs | Provider | Forecastlocatie | Cache | Ontbrekend |
-          |---|---|---|---|---:|---:|---:|---|---|---|---|---:|---|
+          | Status | Bestemming | Modus | Periode | Dagen | Score | Weer | Efficiëntie | Aanrijtijd | Reden | Bewijs | Provider | Forecastlocatie | Cache | Ontbrekend |
+          |---|---|---|---|---:|---:|---:|---:|---:|---|---|---|---|---:|---|
           {% for item in rows %}
           {% set item = item if item is mapping else {} %}
-          | {{ item.get('eligibility_result', 'n.b.') }} | {{ item.get('destination', 'n.b.') }} | {{ item.get('mode_label', 'n.v.t.') }} | {{ item.get('period', 'n.b.') }} | {{ item.get('duration_days', 'n.b.') }} | {{ item.get('total_score', 'n.b.') }} | {{ item.get('weather_score', 'n.b.') }} | {{ item.get('primary_reason', 'n.b.') }} | {{ item.get('supporting_evidence', 'Geen bewijs beschikbaar.') }} | {{ item.get('weather_provider', 'n.b.') }} | {{ item.get('forecast_location', 'n.b.') }} | {{ item.get('cache_age_minutes', 'n.b.') }} min | {{ item.get('missing_data', []) | join(', ') if item.get('missing_data') else '-' }} |
+          | {{ item.get('eligibility_result', 'n.b.') }} | {{ item.get('destination', 'n.b.') }} | {{ item.get('mode_label', 'n.v.t.') }} | {{ item.get('period', 'n.b.') }} | {{ item.get('duration_days', 'n.b.') }} | {{ item.get('total_score', 'n.b.') }} | {{ item.get('weather_score', 'n.b.') }} | {{ item.get('trip_efficiency_score', 'n.b.') }} | {{ item.get('approach_time_hours', 'n.b.') }} u | {{ item.get('primary_reason', 'n.b.') }} | {{ item.get('supporting_evidence', 'Geen bewijs beschikbaar.') }} | {{ item.get('weather_provider', 'n.b.') }} | {{ item.get('forecast_location', 'n.b.') }} | {{ item.get('cache_age_minutes', 'n.b.') }} min | {{ item.get('missing_data', []) | join(', ') if item.get('missing_data') else '-' }} |
           {% else %}
-          | Geen kandidaten | - | - | - | - | - | - | Wachten op data | RideRadar heeft nog geen evaluatie gemaakt. | - | - | - | - |
+          | Geen kandidaten | - | - | - | - | - | - | - | - | Wachten op data | RideRadar heeft nog geen evaluatie gemaakt. | - | - | - | - |
           {% endfor %}
 ```
 

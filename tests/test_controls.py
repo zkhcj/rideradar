@@ -156,11 +156,12 @@ async def test_native_available_hours_changes_trip_efficiency(hass) -> None:
     ]
 
 
-async def test_native_max_approach_time_changes_exclusion_reasons(hass) -> None:
+async def test_native_max_approach_time_is_preference_not_exclusion(hass) -> None:
     coordinator = RideRadarDataCoordinator(hass, _entry(forecast_days=3), FakeApiClient(), FakeRoutingClient())
     coordinator.set_runtime_control("max_approach_time_hours", "0.5")
 
     data = await coordinator._async_update_data()
 
-    assert data["opportunities"] == []
-    assert any(item["reason"] == "approach_time_too_high" for item in data["excluded_destinations"])
+    assert data["opportunities"]
+    assert data["opportunities"][0]["preferred_approach_time_overrun_hours"] > 0
+    assert not any(item["reason"] == "approach_time_too_high" for item in data["excluded_destinations"])

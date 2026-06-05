@@ -37,6 +37,7 @@ async def async_get_config_entry_diagnostics(
             "all_opportunities_sample": _compact_opportunities((data.get("all_opportunities") or [])[:10]),
             "summary": data.get("summary"),
             "weather": data.get("weather", {}),
+            "mode_status": data.get("mode_status", {}),
             "evaluation_summary": data.get("evaluation_summary", {}),
             "evaluated_candidates": data.get("evaluated_candidates", []),
             "active_helpers": data.get("active_helpers", {}),
@@ -84,6 +85,7 @@ def _compact_opportunity(item: dict[str, Any]) -> dict[str, Any]:
         "score_caps": item.get("score_caps"),
         "recommendation_reason": item.get("recommendation_reason"),
         "tradeoffs": item.get("tradeoffs", []),
+        "weather_evaluation": item.get("weather_evaluation"),
     }
 
 

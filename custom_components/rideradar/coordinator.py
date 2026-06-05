@@ -13,12 +13,14 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import OpenMeteoClient
 from .const import (
+    CONF_ABSOLUTE_MAX_APPROACH_TIME_HOURS,
     CONF_ACTIVITY_PROFILE,
     CONF_CUSTOM_TRIP_DURATION_DAYS,
     CONF_DETOUR_FACTOR,
     CONF_DURATION_MODE,
     CONF_FORECAST_DAYS,
     CONF_MAX_ROUTE_DISTANCE_KM,
+    CONF_PREFERRED_MAX_APPROACH_TIME_HOURS,
     CONF_PREFERRED_TRIP_DURATION,
     CONF_START_LATITUDE,
     CONF_START_LONGITUDE,
@@ -39,8 +41,8 @@ from .const import (
     DEFAULT_DETOUR_FACTOR,
     DEFAULT_DURATION_MODE,
     DEFAULT_FORECAST_DAYS,
-    DEFAULT_MAX_APPROACH_TIME_HOURS,
     DEFAULT_MAX_ROUTE_DISTANCE_KM,
+    DEFAULT_PREFERRED_MAX_APPROACH_TIME_HOURS,
     DEFAULT_PREFERRED_TRIP_DURATION,
     DEFAULT_TRAILER_SUPPORT_ENABLED,
     DEFAULT_TRAVEL_STRATEGY,
@@ -264,11 +266,14 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             "travel_strategy": planning_profile.travel_strategy,
             "available_hours_per_day": planning_profile.available_hours_per_day,
             "max_approach_time_hours": planning_profile.max_approach_time_hours,
+            "preferred_max_approach_time_hours": planning_profile.preferred_max_approach_time_hours,
+            "absolute_max_approach_time_hours": planning_profile.absolute_max_approach_time_hours,
             "trailer_available": planning_profile.trailer_available,
             "weekend_only": window_preferences.weekend_only,
             "preferred_start_weekday": window_preferences.preferred_start_weekday,
             "active_helpers": active_helpers,
-            "weather": self.forecast_cache.status(),
+            "mode_status": _mode_status(planning_profile),
+            "weather": _weather_status_with_results(self.forecast_cache.status(), []),
         }
 
     async def _async_update_data(self) -> CoordinatorData:
@@ -332,11 +337,14 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 "travel_strategy": planning_profile.travel_strategy,
                 "available_hours_per_day": planning_profile.available_hours_per_day,
                 "max_approach_time_hours": planning_profile.max_approach_time_hours,
+                "preferred_max_approach_time_hours": planning_profile.preferred_max_approach_time_hours,
+                "absolute_max_approach_time_hours": planning_profile.absolute_max_approach_time_hours,
                 "trailer_available": planning_profile.trailer_available,
                 "weekend_only": window_preferences.weekend_only,
                 "preferred_start_weekday": window_preferences.preferred_start_weekday,
                 "active_helpers": active_helpers,
-                "weather": self.forecast_cache.status(),
+                "mode_status": _mode_status(planning_profile),
+                "weather": _weather_status_with_results(self.forecast_cache.status(), []),
             }
 
         results: list[DestinationResult] = []
@@ -399,6 +407,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
         excluded_destinations = _excluded_destinations(results) + disabled_destinations
         evaluated_candidates = _evaluated_candidates(opportunities, all_opportunities, excluded_destinations)
         evaluation_summary = _evaluation_summary(evaluated_candidates)
+        evaluation_summary["disabled_modes"] = _disabled_modes_from_status(_mode_status(planning_profile))
         advice_candidate = _advice_candidate(evaluated_candidates)
         if LOGGER.isEnabledFor(logging.DEBUG):
             LOGGER.debug(
@@ -449,11 +458,14 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             "travel_strategy": planning_profile.travel_strategy,
             "available_hours_per_day": planning_profile.available_hours_per_day,
             "max_approach_time_hours": planning_profile.max_approach_time_hours,
+            "preferred_max_approach_time_hours": planning_profile.preferred_max_approach_time_hours,
+            "absolute_max_approach_time_hours": planning_profile.absolute_max_approach_time_hours,
             "trailer_available": planning_profile.trailer_available,
             "weekend_only": window_preferences.weekend_only,
             "preferred_start_weekday": window_preferences.preferred_start_weekday,
             "active_helpers": active_helpers,
-            "weather": self.forecast_cache.status(),
+            "mode_status": _mode_status(planning_profile),
+            "weather": _weather_status_with_results(self.forecast_cache.status(), results),
         }
 
     async def _evaluate_destination(
@@ -509,6 +521,47 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 ),
             )
 
+        absolute_approach_time = _route_approach_time_for_strategy(route.travel_time_minutes, planning_profile)
+        if (
+            planning_profile.absolute_max_approach_time_hours is not None
+            and absolute_approach_time > planning_profile.absolute_max_approach_time_hours
+        ):
+            return DestinationResult(
+                destination=destination,
+                route=route,
+                forecasts=[],
+                scores={},
+                best_day=None,
+                best_score=None,
+                best_forecast=None,
+                trip_score=None,
+                best_trip_window=None,
+                best_start_day=None,
+                trip_duration=trip_duration.max_days,
+                weather_stability_score=None,
+                stability_explanation="Niet beoordeeld omdat een harde aanrijlimiet is overschreden.",
+                daily_scores={},
+                trip_score_breakdown=None,
+                trip_explanation="Absolute aanrijlimiet overschreden.",
+                ride_quality_score=None,
+                ride_experience=None,
+                all_trip_windows=[],
+                reachable=False,
+                available=True,
+                explanation=(
+                    f"Geschatte aanrijtijd {absolute_approach_time:.1f} uur. "
+                    f"Absolute maximale aanrijtijd: "
+                    f"{planning_profile.absolute_max_approach_time_hours:.1f} uur."
+                ),
+                exclusion_reasons=["absolute_approach_time_exceeded"],
+                weather=_destination_weather_metadata(
+                    destination,
+                    None,
+                    "unavailable",
+                    "destination_not_evaluated",
+                ),
+            )
+
         cached_forecast = await self.forecast_cache.async_get_forecast(
             destination.latitude,
             destination.longitude,
@@ -525,6 +578,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             cache_age_hours=cached_forecast.cache_age_hours,
             fetched_at=cached_forecast.fetched_at,
             missing_fields=cached_forecast.missing_fields,
+            from_cache=cached_forecast.from_cache,
         )
         scores = {forecast.date: calculate_ride_score(forecast, activity_profile) for forecast in forecasts}
         best_forecast = max(forecasts, key=lambda item: scores[item.date].score, default=None)
@@ -544,7 +598,7 @@ class RideRadarDataCoordinator(DataUpdateCoordinator[CoordinatorData]):
             for window in all_trip_windows
         ]
         viable_ride_experiences = [
-            (window, experience) for window, experience in ride_experiences if not experience.exclusion_reasons
+            (window, experience) for window, experience in ride_experiences if not experience.hard_exclusion_reasons
         ]
         best_trip_window, best_ride_experience = max(
             viable_ride_experiences,
@@ -635,7 +689,7 @@ def _opportunities(
                 result.forecasts,
                 planning_profile,
             )
-            if experience.exclusion_reasons:
+            if experience.hard_exclusion_reasons:
                 continue
             opportunities.append(
                 _opportunity_payload(
@@ -684,7 +738,7 @@ def _all_opportunities(
                     result.forecasts,
                     strategy_profile,
                 )
-                if experience.exclusion_reasons:
+                if experience.hard_exclusion_reasons:
                     continue
                 opportunity = _opportunity_payload(
                     result,
@@ -720,6 +774,8 @@ def _opportunity_payload(
         "end_date_display": _format_date(window.end_day),
         "period": _format_period(window.start_day, window.end_day),
         "duration_days": window.duration_days,
+        "preferred_duration_days": trip_duration.max_days,
+        "preferred_duration_difference_days": abs(window.duration_days - trip_duration.max_days),
         "trip_score": window.trip_score,
         "score": experience.ride_quality_score,
         "ride_quality_score": experience.ride_quality_score,
@@ -745,10 +801,17 @@ def _opportunity_payload(
         "travel_strategy": experience.travel_strategy,
         "approach_time_hours": experience.approach_time_hours,
         "return_time_hours": experience.return_time_hours,
+        "total_transport_time_hours": experience.total_transport_time_hours,
         "total_available_time_hours": experience.total_available_time_hours,
         "estimated_destination_ride_time_hours": experience.estimated_destination_ride_time_hours,
         "approach_enjoyment_factor": experience.approach_enjoyment_factor,
         "destination_ride_time_ratio": experience.destination_ride_time_ratio,
+        "preferred_max_approach_time_hours": experience.preferred_max_approach_time_hours,
+        "absolute_max_approach_time_hours": experience.absolute_max_approach_time_hours,
+        "preferred_approach_time_overrun_hours": experience.preferred_approach_time_overrun_hours,
+        "absolute_approach_time_overrun_hours": experience.absolute_approach_time_overrun_hours,
+        "preference_warnings": experience.preference_warnings,
+        "hard_exclusion_reasons": experience.hard_exclusion_reasons,
         "score_breakdown": _score_breakdown(experience, window),
         "recommendation_reason": _recommendation_reason(result.destination.name, experience, window),
         "main_reason": _main_reason(result.destination.name, experience, window),
@@ -764,6 +827,7 @@ def _opportunity_payload(
         "distance_km": result.route.distance_km,
         "estimated_travel_time": _format_minutes(result.route.travel_time_minutes),
         "daily_scores": window.daily_scores,
+        "weather_evaluation": _weather_evaluation(result.forecasts, window),
         "verdict": _window_verdict(experience.ride_quality_score, _is_weekend_window(window)),
         "explanation": f"{window.trip_explanation} {experience.explanation}",
         "window_type": "weekend" if _is_weekend_window(window) else "weekday",
@@ -817,6 +881,8 @@ def _all_opportunity_strategy_profiles(planning_profile: TripPlanningProfile) ->
             travel_strategy=strategy,
             available_hours_per_day=planning_profile.available_hours_per_day,
             max_approach_time_hours=planning_profile.max_approach_time_hours,
+            preferred_max_approach_time_hours=planning_profile.preferred_max_approach_time_hours,
+            absolute_max_approach_time_hours=planning_profile.absolute_max_approach_time_hours,
             trailer_support_enabled=planning_profile.trailer_support_enabled,
             trailer_available=planning_profile.trailer_available,
         )
@@ -839,6 +905,8 @@ def _compact_table_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
         "strategy": opportunity["strategy"],
         "strategy_label": opportunity["strategy_label"],
         "duration_days": opportunity["duration_days"],
+        "preferred_duration_days": opportunity.get("preferred_duration_days"),
+        "preferred_duration_difference_days": opportunity.get("preferred_duration_difference_days"),
         "period": opportunity["period"],
         "start_date": opportunity["start_date"],
         "end_date": opportunity["end_date"],
@@ -851,6 +919,9 @@ def _compact_table_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
         "distance_km": opportunity["distance_km"],
         "route_distance_km": opportunity["route_distance_km"],
         "approach_time_hours": opportunity["approach_time_hours"],
+        "preferred_max_approach_time_hours": opportunity.get("preferred_max_approach_time_hours"),
+        "absolute_max_approach_time_hours": opportunity.get("absolute_max_approach_time_hours"),
+        "preferred_approach_time_overrun_hours": opportunity.get("preferred_approach_time_overrun_hours"),
         "verdict": opportunity["verdict"],
         "main_reason": opportunity["main_reason"],
         "main_tradeoff": opportunity["main_tradeoff"],
@@ -859,6 +930,160 @@ def _compact_table_opportunity(opportunity: dict[str, Any]) -> dict[str, Any]:
         "forecast_location_name": opportunity.get("forecast_location_name"),
         "forecast_cache_age_hours": opportunity.get("forecast_cache_age_hours"),
     }
+
+
+def _weather_evaluation(forecasts: list[Any], window: Any) -> dict[str, Any]:
+    window_forecasts = [forecast for forecast in forecasts if forecast.date in window.daily_scores]
+    precipitation = [forecast.precipitation_amount_mm or 0 for forecast in window_forecasts]
+    precipitation_probability = [forecast.precipitation_probability or 0 for forecast in window_forecasts]
+    temperatures = [forecast.temperature_c for forecast in window_forecasts if forecast.temperature_c is not None]
+    wind_speeds = [forecast.wind_speed_kmh or 0 for forecast in window_forecasts]
+    wind_gusts = [forecast.wind_gusts_kmh or 0 for forecast in window_forecasts]
+    cloud_cover = [forecast.cloud_cover or 0 for forecast in window_forecasts]
+    daily = []
+    aggregate_penalties: list[dict[str, Any]] = []
+    for forecast in window_forecasts:
+        day_penalties = _weather_penalties_for_forecast(forecast)
+        daily.append(
+            {
+                "date": forecast.date,
+                "score": window.daily_scores.get(forecast.date),
+                "precipitation_mm": forecast.precipitation_amount_mm,
+                "precipitation_probability": forecast.precipitation_probability,
+                "temperature_c": forecast.temperature_c,
+                "wind_speed_kmh": forecast.wind_speed_kmh,
+                "wind_gust_kmh": forecast.wind_gusts_kmh,
+                "cloud_coverage": forecast.cloud_cover,
+                "weather_code": forecast.weather_code,
+                "penalties": day_penalties,
+            }
+        )
+        aggregate_penalties.extend(day_penalties)
+    return {
+        "aggregate": {
+            "score": window.trip_score,
+            "stability_score": window.weather_stability_score,
+            "minimum_temperature": min(temperatures) if temperatures else None,
+            "maximum_temperature": max(temperatures) if temperatures else None,
+            "total_precipitation_mm": round(sum(precipitation), 1),
+            "maximum_precipitation_probability": max(precipitation_probability) if precipitation_probability else None,
+            "maximum_wind_speed_kmh": max(wind_speeds) if wind_speeds else None,
+            "maximum_wind_gust_kmh": max(wind_gusts) if wind_gusts else None,
+            "maximum_cloud_coverage": max(cloud_cover) if cloud_cover else None,
+            "evaluated_days": len(window_forecasts),
+            "bad_weather_penalty": window.trip_score_breakdown.bad_weather_penalty,
+        },
+        "daily": daily,
+        "penalties": aggregate_penalties,
+    }
+
+
+def _weather_penalties_for_forecast(forecast: Any) -> list[dict[str, Any]]:
+    penalties: list[dict[str, Any]] = []
+    precipitation_probability = forecast.precipitation_probability or 0
+    if precipitation_probability:
+        penalties.append(
+            {
+                "reason": "regenverwachting",
+                "value": precipitation_probability,
+                "threshold": 0,
+                "penalty": round(min(35.0, precipitation_probability * 0.35)),
+            }
+        )
+    precipitation_amount = forecast.precipitation_amount_mm or 0
+    if precipitation_amount:
+        penalties.append(
+            {
+                "reason": "neerslaghoeveelheid",
+                "value": precipitation_amount,
+                "threshold": 0,
+                "penalty": round(min(30.0, precipitation_amount * 10)),
+            }
+        )
+    wind_speed = forecast.wind_speed_kmh or 0
+    if wind_speed > 20:
+        penalties.append(
+            {
+                "reason": "wind",
+                "value": wind_speed,
+                "threshold": 20,
+                "penalty": round(min(20.0, (wind_speed - 20) * 0.7)),
+            }
+        )
+    wind_gusts = forecast.wind_gusts_kmh or 0
+    if wind_gusts > 35:
+        penalties.append(
+            {
+                "reason": "windstoten",
+                "value": wind_gusts,
+                "threshold": 35,
+                "penalty": round(min(25.0, (wind_gusts - 35) * 0.8)),
+            }
+        )
+    temperature = forecast.temperature_c
+    if temperature is not None and (temperature < 14 or temperature > 32):
+        penalties.append(
+            {
+                "reason": "temperatuur",
+                "value": temperature,
+                "threshold": "14-32",
+                "penalty": _temperature_penalty(temperature),
+            }
+        )
+    cloud_cover = forecast.cloud_cover or 0
+    if cloud_cover > 60:
+        penalties.append(
+            {
+                "reason": "bewolking",
+                "value": cloud_cover,
+                "threshold": 60,
+                "penalty": 8 if cloud_cover > 80 else 4,
+            }
+        )
+    bad_weather_codes = {
+        51,
+        53,
+        55,
+        56,
+        57,
+        61,
+        63,
+        65,
+        66,
+        67,
+        71,
+        73,
+        75,
+        77,
+        80,
+        81,
+        82,
+        85,
+        86,
+        95,
+        96,
+        99,
+    }
+    if forecast.weather_code in bad_weather_codes:
+        penalties.append(
+            {
+                "reason": "weercode",
+                "value": forecast.weather_code,
+                "threshold": "droog/veilig",
+                "penalty": 15,
+            }
+        )
+    return penalties
+
+
+def _temperature_penalty(temperature: float) -> int:
+    if temperature < 8:
+        return round(min(30.0, (8 - temperature) * 4))
+    if temperature < 14:
+        return round((14 - temperature) * 2)
+    if temperature > 32:
+        return round(min(25.0, (temperature - 32) * 3))
+    return 0
 
 
 def _strategy_label(strategy: str) -> str:
@@ -878,6 +1103,7 @@ def _destination_weather_metadata(
     cache_age_hours: float | None = None,
     fetched_at: str | None = None,
     missing_fields: list[str] | None = None,
+    from_cache: bool | None = None,
 ) -> dict[str, Any]:
     return {
         "weather_status": status,
@@ -889,7 +1115,102 @@ def _destination_weather_metadata(
         "forecast_cache_age_hours": cache_age_hours,
         "fetched_at": fetched_at,
         "missing_fields": missing_fields or [],
+        "from_cache": from_cache,
     }
+
+
+def _weather_status_with_results(status: dict[str, Any], results: list[DestinationResult]) -> dict[str, Any]:
+    """Add destination-level weather coverage to the compact provider status."""
+    relevant = [result for result in results if result.reachable]
+    destination_status: dict[str, dict[str, Any]] = {}
+    fresh = stale = without = 0
+    live_calls = cache_hits = failed = 0
+    last_processed: str | None = None
+    for result in relevant:
+        weather = result.weather or {}
+        name = result.destination.name
+        weather_status = str(weather.get("weather_status") or "unavailable")
+        if weather_status in {"ok", "partial"}:
+            fresh += 1
+        elif weather_status == "stale":
+            stale += 1
+        else:
+            without += 1
+        if weather.get("from_cache") is True:
+            cache_hits += 1
+        elif weather_status in {"ok", "partial", "stale"}:
+            live_calls += 1
+        else:
+            failed += 1
+        last_processed = str(weather.get("forecast_location_name") or name)
+        destination_status[name] = {
+            "status": weather_status,
+            "provider": weather.get("weather_provider_used"),
+            "forecast_location": weather.get("forecast_location_name") or name,
+            "cache_age_minutes": _hours_to_minutes(weather.get("forecast_cache_age_hours")),
+            "from_cache": weather.get("from_cache"),
+            "missing_fields": weather.get("missing_fields", []),
+        }
+    enriched = dict(status)
+    if "forecast_location_name" in enriched:
+        enriched["last_processed_forecast_location"] = enriched.pop("forecast_location_name")
+    enriched["forecast_coverage"] = {
+        "destinations_requested": len(relevant),
+        "destinations_with_fresh_weather": fresh,
+        "destinations_with_stale_weather": stale,
+        "destinations_without_weather": without,
+    }
+    enriched["destination_weather_status"] = destination_status
+    enriched["weather_fetch_summary"] = {
+        "destinations_configured": len(results),
+        "destinations_skipped_by_hard_constraint": len([result for result in results if not result.reachable]),
+        "destinations_with_potential_windows": len(relevant),
+        "live_provider_calls": live_calls,
+        "cache_hits": cache_hits,
+        "failed_fetches": failed,
+    }
+    if last_processed:
+        enriched["last_processed_forecast_location"] = last_processed
+    return enriched
+
+
+def _mode_status(planning_profile: TripPlanningProfile) -> dict[str, dict[str, Any]]:
+    return {
+        TRAVEL_STRATEGY_MOTORCYCLE_DIRECT: {
+            "enabled": True,
+            "label": _strategy_label(TRAVEL_STRATEGY_MOTORCYCLE_DIRECT),
+        },
+        TRAVEL_STRATEGY_MOTORCYCLE_SCENIC: {
+            "enabled": True,
+            "label": _strategy_label(TRAVEL_STRATEGY_MOTORCYCLE_SCENIC),
+        },
+        TRAVEL_STRATEGY_TRAILER: {
+            "enabled": planning_profile.trailer_support_enabled and planning_profile.trailer_available,
+            "label": _strategy_label(TRAVEL_STRATEGY_TRAILER),
+            "reason": None
+            if planning_profile.trailer_support_enabled and planning_profile.trailer_available
+            else (
+                "Aanhangertransport staat uit"
+                if not planning_profile.trailer_support_enabled
+                else "Aanhanger vandaag niet beschikbaar"
+            ),
+        },
+    }
+
+
+def _disabled_modes_from_status(mode_status: dict[str, dict[str, Any]]) -> dict[str, str]:
+    return {
+        mode: str(status.get("reason"))
+        for mode, status in mode_status.items()
+        if not status.get("enabled") and status.get("reason")
+    }
+
+
+def _route_approach_time_for_strategy(travel_time_minutes: int, planning_profile: TripPlanningProfile) -> float:
+    approach_time = travel_time_minutes / 60
+    if planning_profile.travel_strategy == TRAVEL_STRATEGY_MOTORCYCLE_SCENIC:
+        return approach_time * 1.18
+    return approach_time
 
 
 def _main_reason(destination: str, experience: Any, window: Any) -> str:
@@ -1065,7 +1386,11 @@ def _evaluated_candidates(
     all_opportunities: list[dict[str, Any]],
     excluded_destinations: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    recommended_key = _candidate_key(selected_opportunities[0]) if selected_opportunities else None
+    recommended_source = next(
+        (opportunity for opportunity in all_opportunities if int(opportunity["ride_quality_score"]) >= 70),
+        None,
+    )
+    recommended_key = _candidate_key(recommended_source) if recommended_source else None
     rows: list[dict[str, Any]] = []
     seen: set[tuple[Any, ...]] = set()
     for opportunity in all_opportunities:
@@ -1108,12 +1433,25 @@ def _candidate_from_opportunity(opportunity: dict[str, Any], result: str) -> dic
         "duration_days": opportunity.get("duration_days"),
         "total_score": opportunity.get("ride_quality_score"),
         "weather_score": opportunity.get("weather_score"),
+        "stability_score": opportunity.get("stability_score"),
+        "trip_efficiency_score": opportunity.get("trip_efficiency_score"),
+        "approach_time_hours": opportunity.get("approach_time_hours"),
+        "return_time_hours": opportunity.get("return_time_hours"),
+        "total_transport_time_hours": opportunity.get("total_transport_time_hours"),
+        "available_trip_hours": opportunity.get("total_available_time_hours"),
+        "usable_destination_hours": opportunity.get("estimated_destination_ride_time_hours"),
+        "preferred_max_approach_time_hours": opportunity.get("preferred_max_approach_time_hours"),
+        "absolute_max_approach_time_hours": opportunity.get("absolute_max_approach_time_hours"),
+        "preferred_approach_time_overrun_hours": opportunity.get("preferred_approach_time_overrun_hours"),
+        "absolute_approach_time_overrun_hours": opportunity.get("absolute_approach_time_overrun_hours"),
         "eligibility_result": _candidate_result_label(result),
         "primary_reason_code": reason_code,
         "primary_reason": primary_reason,
         "evidence": evidence,
         "supporting_evidence": "; ".join(evidence),
         "secondary_reasons": opportunity.get("tradeoffs", []),
+        "preference_warnings": opportunity.get("preference_warnings", []),
+        "hard_exclusion_reasons": opportunity.get("hard_exclusion_reasons", []),
         "weather_provider": opportunity.get("weather_provider_used"),
         "forecast_location": opportunity.get("forecast_location_name"),
         "weather_status": opportunity.get("weather_status"),
@@ -1129,9 +1467,11 @@ def _candidate_from_opportunity(opportunity: dict[str, Any], result: str) -> dic
             "trip_efficiency": score_breakdown.get("trip_efficiency_score"),
             "final": score_breakdown.get("ride_quality_score"),
         },
+        "weather_evaluation": opportunity.get("weather_evaluation"),
         "hard_rule_results": {
             "weather_data": opportunity.get("weather_status") in {"ok", "partial", "stale"},
             "score_threshold": (opportunity.get("ride_quality_score") or 0) >= 70,
+            "approach_time": not opportunity.get("hard_exclusion_reasons"),
         },
     }
 
@@ -1185,13 +1525,30 @@ def _opportunity_evidence(opportunity: dict[str, Any], result: str) -> list[str]
     score = opportunity.get("ride_quality_score")
     weather = opportunity.get("weather_score")
     duration = opportunity.get("duration_days")
+    approach = opportunity.get("approach_time_hours")
+    preferred_approach = opportunity.get("preferred_max_approach_time_hours")
+    absolute_approach = opportunity.get("absolute_max_approach_time_hours")
     evidence = [
         f"Totaalscore {score}/100; adviesdrempel 70.",
         f"Weerscore {weather}/100.",
         f"Duur {duration} dagen.",
     ]
+    preferred_duration = opportunity.get("preferred_duration_days")
+    if preferred_duration is not None and preferred_duration != duration:
+        evidence.append(f"Wijkt af van voorkeursduur {preferred_duration} dagen; dit is geen harde afwijzing.")
+    if approach is not None:
+        if preferred_approach is not None:
+            evidence.append(
+                f"Aanrijtijd {float(approach):.1f} uur; voorkeur maximaal {float(preferred_approach):.1f} uur."
+            )
+        else:
+            evidence.append(f"Aanrijtijd {float(approach):.1f} uur; geen aanrijtijdvoorkeur ingesteld.")
+    if absolute_approach is not None:
+        evidence.append(f"Absolute aanrijlimiet {float(absolute_approach):.1f} uur.")
+    else:
+        evidence.append("Geen absolute aanrijlimiet ingesteld.")
     if result == "recommended":
-        evidence.insert(0, "Hoogst gerangschikte kandidaat binnen de actieve instellingen.")
+        evidence.insert(0, "Hoogst gerangschikte geschikte kandidaat binnen de actieve instellingen.")
     elif result == "eligible":
         evidence.insert(0, "Voldoet aan harde eisen, maar een andere kandidaat staat hoger.")
     else:
@@ -1215,8 +1572,13 @@ def _evaluation_summary(candidates: list[dict[str, Any]]) -> dict[str, Any]:
         if result in counts:
             counts[result] += 1
         reason = candidate.get("primary_reason_code")
-        if result in {"rejected", "unavailable", "compromise"} and reason:
+        if result in {"rejected", "unavailable"} and reason:
             reason_counts[str(reason)] = reason_counts.get(str(reason), 0) + 1
+    compromise_reason_counts: dict[str, int] = {}
+    for candidate in candidates:
+        if candidate.get("result") == "compromise" and candidate.get("primary_reason_code"):
+            reason = str(candidate["primary_reason_code"])
+            compromise_reason_counts[reason] = compromise_reason_counts.get(reason, 0) + 1
     return {
         "total_candidates": len(candidates),
         "recommended": counts["recommended"],
@@ -1227,6 +1589,8 @@ def _evaluation_summary(candidates: list[dict[str, Any]]) -> dict[str, Any]:
         "suitable": counts["recommended"] + counts["eligible"],
         "rejection_reason_counts": reason_counts,
         "rejection_reason_labels": {reason: _reason_label(reason) for reason in reason_counts},
+        "compromise_reason_counts": compromise_reason_counts,
+        "compromise_reason_labels": {reason: _reason_label(reason) for reason in compromise_reason_counts},
     }
 
 
@@ -1258,6 +1622,7 @@ def _reason_label(reason: str) -> str:
         "preferred_start_day_filter": "Past niet bij voorkeursdag",
         "trailer_required_but_unavailable": "Aanhanger nodig, maar niet beschikbaar",
         "trailer_disabled": "Aanhangertransport staat uit",
+        "absolute_approach_time_exceeded": "Absolute aanrijlimiet overschreden",
         "approach_time_too_high": "Aanrijtijd te hoog",
         "insufficient_destination_ride_time": "Te weinig bruikbare rijtijd",
         "disabled": "Bestemming uitgeschakeld",
@@ -1364,8 +1729,8 @@ def _canonical_exclusion_reason(reason: str) -> str:
         return "trailer_required_but_unavailable"
     if "trailer" in normalized and "disabled" in normalized:
         return "trailer_disabled"
-    if "max travel effort" in normalized:
-        return "approach_time_too_high"
+    if "absolute max approach time" in normalized:
+        return "absolute_approach_time_exceeded"
     return "insufficient_destination_ride_time"
 
 
@@ -1380,7 +1745,10 @@ def _exclusion_details(reason: str, result: DestinationResult) -> str:
             "Aanhangertransport is gekozen, maar de aanhanger is vandaag niet beschikbaar."
         ),
         "trailer_disabled": "Aanhangertransport staat uit in de RideRadar-instellingen.",
-        "approach_time_too_high": "De aanrijtijd is hoger dan de ingestelde maximale reistijd.",
+        "absolute_approach_time_exceeded": (
+            "De aanrijtijd is hoger dan de expliciet ingestelde absolute aanrijlimiet."
+        ),
+        "approach_time_too_high": "De aanrijtijd is hoger dan de ingestelde voorkeurswaarde.",
         "insufficient_destination_ride_time": "Er blijft te weinig bruikbare rijtijd over op de bestemming.",
     }
     return details.get(reason, result.explanation)
@@ -1412,6 +1780,8 @@ def _decision_trace(
             "trailer_available": planning_profile.trailer_available,
             "available_hours_per_day": planning_profile.available_hours_per_day,
             "max_approach_time_hours": planning_profile.max_approach_time_hours,
+            "preferred_max_approach_time_hours": planning_profile.preferred_max_approach_time_hours,
+            "absolute_max_approach_time_hours": planning_profile.absolute_max_approach_time_hours,
             "helper_overrides": active_helpers,
         },
         "window": {
@@ -1604,7 +1974,7 @@ def _trip_duration_selection(
         mode = "fixed"
     max_supported = max(MIN_TRIP_DURATION_DAYS, min(forecast_days, MAX_FORECAST_DAYS))
     max_days = max(MIN_TRIP_DURATION_DAYS, min(int(config_duration), max_supported))
-    min_days = MIN_TRIP_DURATION_DAYS if mode == "flexible" else max_days
+    min_days = MIN_TRIP_DURATION_DAYS if mode == "flexible" or max_days == 1 else min(2, max_days)
     return TripDurationSelection(mode=mode, min_days=min_days, max_days=max_days, source=source)
 
 
@@ -1857,6 +2227,17 @@ def _trip_planning_profile(
         config.get(CONF_TRAILER_SUPPORT_ENABLED, DEFAULT_TRAILER_SUPPORT_ENABLED),
         DEFAULT_TRAILER_SUPPORT_ENABLED,
     )
+    preferred_approach_time = _helper_float(
+        hass,
+        MAX_APPROACH_TIME_ENTITY,
+        float(config.get(CONF_PREFERRED_MAX_APPROACH_TIME_HOURS, DEFAULT_PREFERRED_MAX_APPROACH_TIME_HOURS)),
+        minimum=0.5,
+        maximum=12.0,
+        native_controls=native_controls,
+        control_key=CONTROL_MAX_APPROACH_TIME_HOURS,
+        native_entity_id=NATIVE_MAX_APPROACH_TIME_ENTITY,
+    )
+    absolute_approach_time = _optional_float(config.get(CONF_ABSOLUTE_MAX_APPROACH_TIME_HOURS))
     return TripPlanningProfile(
         travel_strategy=strategy,
         available_hours_per_day=_helper_float(
@@ -1869,16 +2250,9 @@ def _trip_planning_profile(
             control_key=CONTROL_AVAILABLE_HOURS_PER_DAY,
             native_entity_id=NATIVE_AVAILABLE_HOURS_ENTITY,
         ),
-        max_approach_time_hours=_helper_float(
-            hass,
-            MAX_APPROACH_TIME_ENTITY,
-            DEFAULT_MAX_APPROACH_TIME_HOURS,
-            minimum=0.5,
-            maximum=12.0,
-            native_controls=native_controls,
-            control_key=CONTROL_MAX_APPROACH_TIME_HOURS,
-            native_entity_id=NATIVE_MAX_APPROACH_TIME_ENTITY,
-        ),
+        max_approach_time_hours=preferred_approach_time,
+        preferred_max_approach_time_hours=preferred_approach_time,
+        absolute_max_approach_time_hours=absolute_approach_time,
         trailer_support_enabled=trailer_support_enabled,
         trailer_available=trailer_support_enabled
         and _helper_bool(
@@ -1938,6 +2312,16 @@ def _helper_float(
     except ValueError:
         return default
     return max(minimum, min(parsed, maximum))
+
+
+def _optional_float(value: Any) -> float | None:
+    if value in {None, ""}:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _helper_bool(
@@ -2051,6 +2435,8 @@ def _tradeoffs(experience: Any, window: Any) -> list[str]:
         tradeoffs.append(f"Weer scoort {experience.weather_score}/100 voor dit venster.")
     if window.weather_stability_score < 80:
         tradeoffs.append(f"Weerstabiliteit is {window.weather_stability_score}/100; een dag kan zwakker zijn.")
+    if getattr(experience, "preference_warnings", []):
+        tradeoffs.extend(getattr(experience, "preference_warnings", []))
     if experience.temperature_score < 80:
         tradeoffs.append(f"Temperatuurcomfort scoort {experience.temperature_score}/100.")
     if experience.distance_score < 80:
@@ -2059,6 +2445,13 @@ def _tradeoffs(experience: Any, window: Any) -> list[str]:
         tradeoffs.append(
             f"Ritefficientie scoort {experience.trip_efficiency_score}/100; er gaat relatief veel tijd naar "
             "aan- en terugrijden."
+        )
+    if getattr(experience, "preferred_approach_time_overrun_hours", 0) > 0:
+        tradeoffs.append(
+            "Aanrijtijd overschrijdt de voorkeur: "
+            f"{experience.approach_time_hours:.1f} uur tegenover "
+            f"{experience.preferred_max_approach_time_hours:.1f} uur voorkeur. "
+            "Dit verlaagt de ritefficientie, maar wijst de rit niet af."
         )
     if experience.holiday_pressure_score < 80:
         tradeoffs.append(f"Vakantiedruk scoort {experience.holiday_pressure_score}/100.")

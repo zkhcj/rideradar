@@ -132,6 +132,7 @@ async def async_setup_entry(
                 "evaluation_summary": data.get("evaluation_summary", {}),
                 "evaluated_candidates": data.get("evaluated_candidates", []),
                 "advice_candidate": data.get("advice_candidate"),
+                "mode_status": data.get("mode_status", {}),
                 "top_exclusion_reason": _top_exclusion_reason(data.get("excluded_destinations")),
                 "best_decision_trace": _best_decision_trace(data),
             },
@@ -145,6 +146,7 @@ async def async_setup_entry(
                 "evaluation_summary": data.get("evaluation_summary", {}),
                 "evaluated_candidates": data.get("evaluated_candidates", []),
                 "advice_candidate": data.get("advice_candidate"),
+                "mode_status": data.get("mode_status", {}),
             },
         ),
         RideRadarSensor(
@@ -601,12 +603,23 @@ def _window_attributes(result: DestinationResult, window: Any, planning_profile:
         "travel_strategy": experience.travel_strategy if experience else None,
         "approach_time_hours": experience.approach_time_hours if experience else None,
         "return_time_hours": experience.return_time_hours if experience else None,
+        "total_transport_time_hours": experience.total_transport_time_hours if experience else None,
         "total_available_time_hours": experience.total_available_time_hours if experience else None,
         "estimated_destination_ride_time_hours": (
             experience.estimated_destination_ride_time_hours if experience else None
         ),
         "approach_enjoyment_factor": experience.approach_enjoyment_factor if experience else None,
         "destination_ride_time_ratio": experience.destination_ride_time_ratio if experience else None,
+        "preferred_max_approach_time_hours": experience.preferred_max_approach_time_hours if experience else None,
+        "absolute_max_approach_time_hours": experience.absolute_max_approach_time_hours if experience else None,
+        "preferred_approach_time_overrun_hours": (
+            experience.preferred_approach_time_overrun_hours if experience else None
+        ),
+        "absolute_approach_time_overrun_hours": (
+            experience.absolute_approach_time_overrun_hours if experience else None
+        ),
+        "preference_warnings": experience.preference_warnings if experience else [],
+        "hard_exclusion_reasons": experience.hard_exclusion_reasons if experience else [],
         "score_breakdown": _window_score_breakdown(experience, window) if experience else None,
         "recommendation_reason": _window_recommendation_reason(result.destination.name, experience, window)
         if experience

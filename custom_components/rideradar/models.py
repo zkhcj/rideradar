@@ -152,10 +152,17 @@ class RideExperience:
     travel_strategy: str
     approach_time_hours: float
     return_time_hours: float
+    total_transport_time_hours: float
     total_available_time_hours: float
     estimated_destination_ride_time_hours: float
     approach_enjoyment_factor: float
     destination_ride_time_ratio: float
+    preferred_max_approach_time_hours: float | None
+    absolute_max_approach_time_hours: float | None
+    preferred_approach_time_overrun_hours: float
+    absolute_approach_time_overrun_hours: float
+    preference_warnings: list[str]
+    hard_exclusion_reasons: list[str]
     score_weights: dict[str, int]
     score_caps: list[dict[str, int | str]]
     verdict: str

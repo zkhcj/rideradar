@@ -20,7 +20,7 @@ from .const import (
     DEFAULT_AVAILABLE_HOURS_PER_DAY,
     DEFAULT_CUSTOM_TRIP_DURATION_DAYS,
     DEFAULT_FORECAST_DAYS,
-    DEFAULT_MAX_APPROACH_TIME_HOURS,
+    DEFAULT_PREFERRED_MAX_APPROACH_TIME_HOURS,
     DOMAIN,
     MANUFACTURER,
     MAX_FORECAST_DAYS,
@@ -77,12 +77,12 @@ NUMBERS = (
     ),
     RideRadarNumberDescription(
         key=CONTROL_MAX_APPROACH_TIME_HOURS,
-        name="Max Approach Time Hours",
+        name="Preferred Approach Time Hours",
         icon="mdi:map-clock",
         minimum=0.5,
         maximum=12,
         step=0.5,
-        default=DEFAULT_MAX_APPROACH_TIME_HOURS,
+        default=DEFAULT_PREFERRED_MAX_APPROACH_TIME_HOURS,
         unit=UnitOfTime.HOURS,
     ),
 )
