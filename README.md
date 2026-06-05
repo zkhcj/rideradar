@@ -4,7 +4,7 @@ RideRadar automatically analyzes weather, forecast stability, trip duration, rou
 
 RideRadar does not just tell you where the weather is good. It tells you where the ride is worth it.
 
-Icon asset: `custom_components/rideradar/assets/icon.svg`. Home Assistant does not load arbitrary custom integration icons in every UI context, so RideRadar uses `mdi:motorbike`/`mdi:map-marker-star` as practical fallbacks in entities and dashboards.
+Icon assets: `custom_components/rideradar/icon.svg`, `custom_components/rideradar/logo.svg`, and `custom_components/rideradar/assets/icon.svg`. RideRadar also uses `mdi:motorbike`/`mdi:map-marker-star` as practical fallbacks in entities and dashboards for Home Assistant UI contexts that only support MDI icons.
 
 ![RideRadar dashboard hero](docs/images/rideradar-dashboard-hero.png)
 
