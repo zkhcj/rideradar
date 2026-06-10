@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.1 - 2026-06-01
+## 1.0.0 - 2026-06-10
 
 - Removed raw destination JSON editing from the normal config flow.
 - Added guided start-location lookup with resolved-coordinate confirmation.
